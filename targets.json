@@ -3,13 +3,13 @@
     "id": 166,
     "type": "drone",
     "count": 1,
-    "status": "active",
-    "reason": "",
+    "status": "archived",
+    "reason": "Впало",
     "lat": 49.9443,
     "lng": 36.3957,
     "label": "🛵 Мопед | ХТЗ",
     "time": "21:21",
-    "expire_at": "2026-01-23T22:06:24.595355"
+    "expire_at": "2026-01-23T21:29:34.915779"
   },
   {
     "id": 168,
