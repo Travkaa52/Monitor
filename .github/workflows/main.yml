@@ -1,0 +1,27 @@
+name: NEPTUN_TACTICAL_OS
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # ЦЕ ОБОВ'ЯЗКОВО ДЛЯ КНОПКИ
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install Deps
+        run: pip install telethon
+      - name: Start Neptun
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID: ${{ secrets.ADMIN_ID }}
+          SESSION_STRING: ${{ secrets.SESSION_STRING }}
+        run: python parser.py
