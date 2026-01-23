@@ -3,13 +3,13 @@
     "id": 159,
     "type": "kab",
     "count": 1,
-    "status": "active",
-    "reason": "",
+    "status": "archived",
+    "reason": "Знищено",
     "lat": 49.993,
     "lng": 36.233,
     "label": "☄️ КАБ | Харків",
     "time": "19:04",
-    "expire_at": "2026-01-23T19:49:41.738161"
+    "expire_at": "2026-01-23T19:11:42.434239"
   },
   {
     "id": 160,
