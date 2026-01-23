@@ -4,64 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>TACTICAL_OS | UNIT 1654</title>
-    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&display=swap" rel="stylesheet">
-    
     <style>
-        :root { 
-            --army-bg: #0d1109; --army-green: #4b5320; --army-bright: #8a9a5b; 
-            --hazard: #d2691e; --text: #c5c5c5; --font-main: 'JetBrains Mono', monospace;
-        }
-
-        body { margin: 0; background: var(--army-bg); color: var(--text); font-family: var(--font-main); overflow: hidden; text-transform: uppercase; }
-        #map { height: 100vh; width: 100%; filter: sepia(0.3) contrast(1.2) brightness(0.7); z-index: 1; }
-
-        /* HEADER */
-        .status-header {
-            position: fixed; top: 0; left: 0; right: 0; z-index: 2000;
-            background: rgba(13, 17, 9, 0.95); border-bottom: 2px solid var(--army-green);
-            padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 10px;
-        }
-
-        .hud-toggle { cursor: pointer; color: var(--army-bright); border: 1px solid var(--army-green); padding: 4px 8px; font-size: 10px; }
-
-        /* LIST */
-        .tactical-list {
-            position: fixed; right: 0; top: 45px; bottom: 100px; width: 300px;
-            background: rgba(13, 17, 9, 0.9); border-left: 2px solid var(--army-green);
-            z-index: 1500; padding: 10px; overflow-y: auto; transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+        :root { --army-bg: #0d1109; --army-green: #4b5320; --army-bright: #8a9a5b; --hazard: #d2691e; --text: #c5c5c5; }
+        body { margin: 0; background: var(--army-bg); font-family: 'JetBrains Mono', monospace; overflow: hidden; text-transform: uppercase; }
+        #map { height: 100vh; width: 100%; filter: sepia(0.3) contrast(1.2) brightness(0.7); }
+        
+        .status-header { position: fixed; top: 0; left: 0; right: 0; z-index: 2000; background: rgba(13, 17, 9, 0.95); border-bottom: 2px solid var(--army-green); padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 10px; }
+        .hud-toggle { cursor: pointer; color: var(--army-bright); border: 1px solid var(--army-green); padding: 4px 8px; }
+        
+        .tactical-list { position: fixed; right: 0; top: 45px; bottom: 100px; width: 300px; background: rgba(13, 17, 9, 0.9); border-left: 2px solid var(--army-green); z-index: 1500; padding: 10px; overflow-y: auto; transition: 0.4s; }
         .hud-hidden { transform: translateX(100%); }
 
-        .target-card { border: 1px solid var(--army-green); background: rgba(0,0,0,0.5); margin-bottom: 8px; padding: 10px; cursor: pointer; }
-        .target-card:hover { border-color: var(--army-bright); }
+        /* СТИЛІ ТВОЇХ МАРКЕРІВ */
+        .mil-icon-container { position: relative; width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; }
+        .mil-icon-frame { position: absolute; width: 34px; height: 34px; border: 2px solid var(--army-bright); transform: rotate(45deg); background: rgba(13,17,9,0.5); }
+        .mil-icon-img { position: relative; width: 26px; height: 26px; z-index: 5; }
+        .heading-vector { position: absolute; bottom: 50%; width: 2px; background: var(--hazard); transform-origin: bottom; filter: drop-shadow(0 0 5px var(--hazard)); }
+        .mil-icon-label { position: absolute; top: 45px; background: var(--army-bg); border: 1px solid var(--army-green); padding: 1px 6px; font-size: 10px; color: var(--army-bright); white-space: nowrap; }
 
-        /* MARKER STYLE */
-        .mil-marker {
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-        }
-        .marker-box {
-            width: 30px; height: 30px; border: 2px solid var(--hazard); 
-            transform: rotate(45deg); background: rgba(210, 105, 30, 0.2);
-            display: flex; align-items: center; justify-content: center;
-        }
-        .marker-label {
-            background: var(--army-bg); color: var(--army-bright);
-            font-size: 8px; padding: 1px 4px; border: 1px solid var(--army-green);
-            margin-top: 10px; white-space: nowrap; transform: rotate(-45deg);
-        }
-
-        .supply-btn {
-            position: fixed; bottom: 30px; right: 10px; width: 280px; height: 50px;
-            background: var(--army-green); color: #fff; border: 2px solid var(--army-bright);
-            display:flex; align-items:center; justify-content:center; z-index:1400; text-decoration:none;
-        }
+        .supply-btn { position: fixed; bottom: 30px; right: 10px; width: 280px; height: 50px; background: var(--army-green); color: #fff; border: 2px solid var(--army-bright); display:flex; align-items:center; justify-content:center; z-index:1400; text-decoration:none; }
+        .disclaimer-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #000; color: var(--hazard); font-size: 8px; text-align: center; padding: 6px 5px; z-index: 3000; }
 
         @media (max-width: 768px) {
             .tactical-list { width: 100%; height: 35vh; top: auto; bottom: 85px; border-left: none; border-top: 2px solid var(--army-green); }
             .hud-hidden { transform: translateY(100%); }
-            .supply-btn { width: calc(100% - 20px); left: 10px; }
         }
     </style>
 </head>
@@ -73,85 +41,99 @@
 </div>
 
 <div class="tactical-list" id="targetList"></div>
-<a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="supply-btn" id="donateBtn">ДОПОМОГА [DONATE]</a>
-
+<a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="supply-btn">ДОПОМОГА [DONATE]</a>
+<div class="disclaimer-bar">НЕ ОФІЦІЙНО. OSINT МОНІТОРИНГ. ТРИВОГА — В УКРИТТЯ!</div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // Ініціалізація карти
+    const TacticalMath = {
+        getDist: (p1, p2) => {
+            const R = 6371;
+            const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+            const dLon = (p2.lng - p1.lng) * Math.PI / 180;
+            const a = Math.sin(dLat/2)**2 + Math.cos(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        },
+        getBearing: (p1, p2) => {
+            const y = Math.sin((p2.lng-p1.lng)*Math.PI/180) * Math.cos(p2.lat*Math.PI/180);
+            const x = Math.cos(p1.lat*Math.PI/180)*Math.sin(p2.lat*Math.PI/180) - Math.sin(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.cos((p2.lng-p1.lng)*Math.PI/180);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
+    };
+
     const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 9);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
 
     let markersLayer = L.layerGroup().addTo(map);
-    let targetMarkers = {}; // Зберігання об'єктів маркерів за ID
+    let targetMarkers = {}; 
+    let state = { targets: new Map() };
 
-    function toggleHUD() {
-        document.getElementById('targetList').classList.toggle('hud-hidden');
-    }
+    function toggleHUD() { document.getElementById('targetList').classList.toggle('hud-hidden'); }
 
     async function syncTactical() {
         try {
             const res = await fetch('targets.json?v=' + Date.now());
             const data = await res.json();
-            
             const list = document.getElementById('targetList');
             list.innerHTML = '';
-
-            // Створюємо набір ID, які є в нових даних
             const currentIds = new Set();
 
             data.forEach(t => {
                 const id = t.id.toString();
                 currentIds.add(id);
+                const prev = state.targets.get(id);
 
-                // 1. ОНОВЛЕННЯ СПИСКУ
+                let speed = 0, bearing = 0;
+                if (prev) {
+                    speed = (TacticalMath.getDist(prev, t) * 3600) / 10;
+                    bearing = TacticalMath.getBearing(prev, t);
+                }
+                state.targets.set(id, { ...t, speed, bearing });
+
+                // Картка
                 const card = document.createElement('div');
                 card.className = 'target-card';
-                card.innerHTML = `
-                    <div style="font-size:9px; color:var(--army-bright)">ID: ${id.slice(-4)} // ${t.type}</div>
-                    <div style="font-size:13px; margin:5px 0; color:#fff;">${t.label}</div>
-                `;
+                card.style.border = "1px solid var(--army-green)";
+                card.style.padding = "10px";
+                card.style.marginBottom = "5px";
+                card.innerHTML = `<div style="font-size:9px; color:var(--army-bright)">${t.type} | ${speed.toFixed(0)} KM/H</div><div style="color:white;">${t.label.split('|')[0]}</div>`;
                 card.onclick = () => map.flyTo([t.lat, t.lng], 11);
                 list.appendChild(card);
 
-                // 2. ОНОВЛЕННЯ МЕТОК НА КАРТІ
-                if (targetMarkers[id]) {
-                    // Якщо маркер вже є - просто рухаємо його
-                    targetMarkers[id].setLatLng([t.lat, t.lng]);
-                } else {
-                    // Якщо немає - створюємо новий
-                    const customIcon = L.divIcon({
-                        className: 'mil-marker',
-                        html: `<div class="marker-box"><div class="marker-label">${t.type}</div></div>`,
-                        iconSize: [30, 30]
-                    });
-
-                    const marker = L.marker([t.lat, t.lng], { icon: customIcon }).addTo(markersLayer);
-                    targetMarkers[id] = marker;
-                }
+                updateMarker(id, t, bearing, speed);
             });
 
-            // 3. ВИДАЛЕННЯ МЕТОК, ЯКИХ БІЛЬШЕ НЕМАЄ В JSON
             for (let id in targetMarkers) {
                 if (!currentIds.has(id)) {
                     markersLayer.removeLayer(targetMarkers[id]);
                     delete targetMarkers[id];
                 }
             }
+        } catch (e) {}
+    }
 
-        } catch (e) {
-            console.error("Помилка синхронізації міток");
+    function updateMarker(id, t, bearing, speed) {
+        const iconPath = `img/${t.type}.png`;
+        const html = `
+            <div class="mil-icon-container">
+                <div class="heading-vector" style="height:${Math.min(speed/5, 60)}px; transform:rotate(${bearing}deg)"></div>
+                <div class="mil-icon-frame"></div>
+                <img src="${iconPath}" class="mil-icon-img" onerror="this.src='img/unknown.png'">
+                <div class="mil-icon-label">${t.label.split('|')[1] || ''}</div>
+            </div>`;
+
+        if (!targetMarkers[id]) {
+            const icon = L.divIcon({ className: '', html: html, iconSize: [40, 40] });
+            targetMarkers[id] = L.marker([t.lat, t.lng], { icon }).addTo(markersLayer);
+        } else {
+            targetMarkers[id].setLatLng([t.lat, t.lng]);
+            targetMarkers[id].getElement().innerHTML = html;
         }
     }
 
-    // Годинник
-    setInterval(() => {
-        document.getElementById('clock').innerText = new Date().toLocaleTimeString() + ' Z';
-    }, 1000);
-
-    // Цикл оновлення
-    setInterval(syncTactical, 5000);
+    setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleTimeString() + ' Z'; }, 1000);
+    setInterval(syncTactical, 10000);
     syncTactical();
 </script>
 </body>
