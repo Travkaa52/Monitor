@@ -3,13 +3,13 @@
     "id": 161,
     "type": "kab",
     "count": 2,
-    "status": "active",
-    "reason": "",
+    "status": "archived",
+    "reason": "Впало",
     "lat": 49.7132,
     "lng": 37.6141,
     "label": "☄️ КАБ | Куп’янськ",
     "time": "20:14",
-    "expire_at": "2026-01-23T20:59:23.415757"
+    "expire_at": "2026-01-23T20:43:18.710416"
   },
   {
     "id": 162,
