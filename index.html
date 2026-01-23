@@ -2,224 +2,183 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>MONITOR KHARKIV | 1654</title>
-    
     <meta name="theme-color" content="#0d1109">
-    <meta name="mobile-web-app-capable" content="yes">
-    <link rel="manifest" href="manifest.json">
-
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&display=swap" rel="stylesheet">
-    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
     <style>
         :root { 
-            --army-bg: #0d1109; 
-            --army-green: #4b5320; 
-            --army-bright: #8a9a5b; 
-            --hazard: #d2691e;
-            --text: #c5c5c5;
-            --font-main: 'JetBrains Mono', monospace;
+            --army-bg: #0d1109; --army-green: #4b5320; --army-bright: #8a9a5b; 
+            --hazard: #d2691e; --text: #c5c5c5; --font-main: 'JetBrains Mono', monospace;
         }
 
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
         body { 
-            margin: 0; background: var(--army-bg); color: var(--text);
-            font-family: var(--font-main); font-weight: bold; overflow: hidden; text-transform: uppercase;
+            margin: 0; font-family: var(--font-main); font-weight: bold; overflow: hidden; 
+            text-transform: uppercase; height: 100vh; color: var(--text); background: var(--army-bg);
         }
 
-        /* Ефект старого ЕЛТ-монітора */
+        /* Завантажувач */
+        #boot-loader {
+            position: fixed; inset: 0; background: #000; z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+            transition: opacity 0.8s ease;
+        }
+        .boot-content { position: relative; width: 85%; max-width: 450px; color: var(--army-bright); }
+        #boot-logs { font-size: 11px; height: 140px; overflow-y: hidden; margin-top: 20px;
+            border-left: 2px solid var(--army-green); padding-left: 12px; line-height: 1.7; }
+        .progress-bar { width: 100%; height: 4px; background: rgba(75,83,32,0.2); margin-top: 20px; border: 1px solid var(--army-green); }
+        .progress-fill { width: 0%; height: 100%; background: var(--army-bright); box-shadow: 0 0 10px var(--army-bright); transition: width 0.4s; }
+
+        /* CRT Effect */
         body::after {
             content: " "; position: fixed; inset: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
-                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
-            background-size: 100% 3px, 3px 100%; pointer-events: none; z-index: 3000;
+            background: linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,0.1) 50%);
+            background-size: 100% 4px; pointer-events: none; z-index: 10000;
         }
 
-        #map { height: 100vh; width: 100%; filter: sepia(0.3) contrast(1.2) brightness(0.7); }
+        /* Модальне вікно FAQ */
+        #faq-modal {
+            display: none; position: fixed; inset: 0; z-index: 5000;
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+            align-items: center; justify-content: center; padding: 20px;
+        }
+        .faq-content {
+            background: var(--army-bg); border: 2px solid var(--army-green);
+            width: 100%; max-width: 450px; padding: 20px; position: relative;
+            box-shadow: 0 0 30px rgba(0,0,0,1);
+        }
+        .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .legend-item { 
+            display: flex; align-items: center; gap: 10px; 
+            background: rgba(75,83,32,0.1); padding: 8px; border: 1px solid var(--army-green); 
+        }
+        .legend-item img { width: 20px; height: 20px; filter: sepia(1) saturate(5) hue-rotate(50deg); }
 
-        .status-header {
-            position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-            background: rgba(13, 17, 9, 0.95); border-bottom: 2px solid var(--army-green);
-            padding: 10px 15px; display: flex; justify-content: space-between; font-size: 11px;
+        #map { height: 100vh; width: 100%; filter: sepia(0.2) contrast(1.1) brightness(0.7); z-index: 1; }
+
+        .status-header { position: fixed; top:0; left:0; right:0; z-index:1000;
+            background: rgba(13,17,9,0.95); border-bottom:2px solid var(--army-green);
+            padding:12px 15px; display:flex; justify-content:space-between; font-size:10px;
+            backdrop-filter: blur(5px); }
+
+        .tactical-list { position: fixed; right:0; top:45px; bottom:110px; width:320px;
+            background: rgba(13,17,9,0.9); border-left:2px solid var(--army-green); z-index:1000;
+            padding:10px; overflow-y:auto; scrollbar-width:none; }
+
+        .supply-btn { position: fixed; bottom:35px; left:20px; width:280px; height:55px;
+            background: var(--army-green); color:#fff; border:2px solid var(--army-bright);
+            display:flex; align-items:center; justify-content:center; z-index:1001;
+            text-decoration:none; font-weight:800; font-size:11px; letter-spacing:1px; }
+
+        /* Дисклеймер-бар */
+        .disclaimer-bar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: rgba(13, 17, 9, 0.95); color: var(--hazard);
+            font-size: 8px; text-align: center; padding: 6px 10px;
+            border-top: 1px solid var(--army-green); z-index: 2000;
+            letter-spacing: 1px; backdrop-filter: blur(5px);
         }
 
-        .tactical-list {
-            position: fixed; right: 0; top: 40px; bottom: 85px; width: 320px;
-            background: rgba(13, 17, 9, 0.9); border-left: 2px solid var(--army-green);
-            z-index: 1000; padding: 10px; overflow-y: auto; scrollbar-width: none;
-        }
-
-        /* Кнопка Донату */
-        .supply-btn {
-            position: fixed; bottom: 10px; right: 10px; width: 300px; height: 60px;
-            background: var(--army-green); color: #fff; border: 2px solid var(--army-bright);
-            display: flex; align-items: center; justify-content: center; z-index: 1001;
-            text-decoration: none; font-weight: 800; letter-spacing: 2px;
-        }
-        .supply-btn:hover { background: var(--army-bright); color: var(--army-bg); }
-
-        .target-card {
-            border: 1px solid var(--army-green); background: rgba(0,0,0,0.5);
-            margin-bottom: 10px; padding: 12px; cursor: pointer; transition: 0.2s;
-        }
-        .target-card.active { border-left: 6px solid var(--hazard); background: rgba(210, 105, 30, 0.1); }
-
-        /* Векторний маркер */
-        .mil-icon-container { position: relative; width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; }
-        .mil-icon-frame { position: absolute; width: 34px; height: 34px; border: 2px solid var(--army-bright); transform: rotate(45deg); background: rgba(13,17,9,0.5); }
-        .mil-icon-img { position: relative; width: 26px; height: 26px; z-index: 5; }
-        
-        /* Лінія вектора руху */
-        .heading-vector {
-            position: absolute; bottom: 50%; width: 2px; 
-            background: var(--hazard); transform-origin: bottom;
-            filter: drop-shadow(0 0 5px var(--hazard));
-        }
-
-        .mil-icon-label {
-            position: absolute; top: 45px; background: var(--army-bg);
-            border: 1px solid var(--army-green); padding: 1px 6px;
-            font-size: 10px; color: var(--army-bright); box-shadow: 2px 2px 0 #000;
-        }
-
-        @media (max-width: 768px) {
-            .tactical-list { width: 100%; height: 30vh; top: auto; bottom: 80px; border-left: none; border-top: 2px solid var(--army-green); }
-            .supply-btn { width: calc(100% - 20px); left: 10px; }
+        @media (max-width:768px) {
+            .tactical-list { width:100%; height:32vh; top:auto; bottom:105px; border-left:none; border-top:2px solid var(--army-green); }
+            .supply-btn { width:calc(100% - 40px); left:20px; bottom:32px; height: 50px; }
         }
     </style>
 </head>
 <body>
 
+<div id="boot-loader">
+    <div class="boot-content">
+        <div style="font-size:14px; letter-spacing:6px; text-align:center; opacity:0.8;"></div>
+        <div id="boot-logs"></div>
+        <div class="progress-bar"><div class="progress-fill" id="p-fill"></div>MONITOR KHARKIV | 1654</div>
+    </div>
+</div>
+
+<div id="faq-modal" onclick="closeFaq()">
+    <div class="faq-content" onclick="event.stopPropagation()">
+        <h3 style="color:var(--army-bright); margin-top:0; font-size:14px;">ДОВІДНИК ТАКТИЧНОЇ ПАНЕЛІ</h3>
+        <div style="font-size:10px; color:var(--hazard); margin:10px 0;">// ЛЕГЕНДА МАРКЕРІВ:</div>
+        <div class="legend-grid">
+            <div class="legend-item"><img src="https://cdn-icons-png.flaticon.com/512/5791/5791772.png" alt=""> <span>БПЛА</span></div>
+            <div class="legend-item"><img src="https://cdn-icons-png.flaticon.com/512/2590/2590510.png" alt=""> <span>РАКЕТА</span></div>
+            <div class="legend-item"><img src="https://cdn-icons-png.flaticon.com/512/3206/3206015.png" alt=""> <span>ЛІТАК</span></div>
+            <div class="legend-item"><img src="https://cdn-icons-png.flaticon.com/512/2092/2092211.png" alt=""> <span>РОЗВІДКА</span></div>
+        </div>
+        <div style="font-size:11px; color:var(--text); text-transform:none; line-height:1.4;">
+            <p>• <b>ВЕКТОР:</b> ЛІНІЯ ПОКАЗУЄ КУРС ЦІЛІ.</p>
+            <p>• <b>DISTANCE:</b> ВІДСТАНЬ ДО ЦЕНТРУ ХАРКОВА.</p>
+        </div>
+        <button onclick="closeFaq()" style="width:100%; margin-top:15px; background:var(--army-green); border:1px solid var(--army-bright); color:white; padding:10px; font-family:inherit; cursor:pointer;">ЗРОЗУМІЛО</button>
+    </div>
+</div>
+
 <div class="status-header">
-    <div>[ UNIT:MONITOR KHARKIV 1654 ] // STATUS: NOMINAL</div>
-    <div id="notif-trigger" onclick="requestPush()" style="cursor:pointer; color:var(--hazard)">[ ENABLE ALERTS ]</div>
-    <div id="clock">00:00:00 1488</div>
+    <div id="sys-title">[ MONITOR KHARKIV 1654 ]</div>
+    <div style="display:flex; gap:15px; align-items:center;">
+        <div onclick="openFaq()" style="cursor:pointer; color:var(--army-bright); font-size:11px; border:1px solid var(--army-green); padding:2px 8px;">[ FAQ ]</div>
+        <div id="clock">00:00:00 LCL</div>
+    </div>
 </div>
 
 <div class="tactical-list" id="targetList"></div>
-
-<a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="supply-btn">
-    ДОПОМОГА ПРОЕКТУ [DONATE]
-</a>
+<a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="supply-btn">ПІДТРИМАТИ ПРОЕКТ [DONATE]</a>
 
 <div id="map"></div>
 
+<div class="disclaimer-bar">
+    ДАНИЙ РЕСУРС НЕ Є ОФІЦІЙНИМ. ВІЗУАЛІЗАЦІЯ ДАНИХ БАЗУЄТЬСЯ ВИКЛЮЧНО НА ВІДКРИТИХ ДЖЕРЕЛАХ!!!
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // --- Tactical Math Module ---
-    const TacticalMath = {
-        getDist: (p1, p2) => {
-            const R = 6371;
-            const dLat = (p2.lat - p1.lat) * Math.PI / 180;
-            const dLon = (p2.lng - p1.lng) * Math.PI / 180;
-            const a = Math.sin(dLat/2)**2 + Math.cos(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.sin(dLon/2)**2;
-            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        },
-        getBearing: (p1, p2) => {
-            const y = Math.sin((p2.lng-p1.lng)*Math.PI/180) * Math.cos(p2.lat*Math.PI/180);
-            const x = Math.cos(p1.lat*Math.PI/180)*Math.sin(p2.lat*Math.PI/180) - Math.sin(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.cos((p2.lng-p1.lng)*Math.PI/180);
-            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-        }
-    };
+const bootLogs = [
+    "ВСТАНОВЛЕННЯ ЗВ'ЯЗКУ З ВУЗЛОМ KH-1654...",
+    "АВТЕНТИФІКАЦІЯ ДОСТУПУ: УСПІШНО.",
+    "ЗАВАНТАЖЕННЯ КАРТОГРАФІЧНИХ ШАРІВ...",
+    "ОТРИМАННЯ ДАНИХ ПРО ЦІЛІ...",
+    "СИСТЕМА ГОТОВА ДО ЕКСПЛУАТАЦІЇ."
+];
 
-    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 8);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+function openFaq() { document.getElementById('faq-modal').style.display = 'flex'; }
+function closeFaq() { document.getElementById('faq-modal').style.display = 'none'; }
 
-    let state = { targets: new Map(), layers: {}, push: false };
-    const homeBase = { lat: 49.99, lng: 36.23 }; // Твоя локація
-
-    function requestPush() {
-        Notification.requestPermission().then(p => { 
-            if(p === 'granted') {
-                state.push = true;
-                document.getElementById('notif-trigger').innerText = "[ ALERTS ACTIVE ]";
-                document.getElementById('notif-trigger').style.color = "var(--army-bright)";
-            }
-        });
+async function typeText(element, text, speed = 30) {
+    for (let char of text) {
+        element.innerText += char;
+        await new Promise(r => setTimeout(r, speed));
     }
+}
 
-    async function syncTactical() {
-        try {
-            const res = await fetch('targets.json?v=' + Date.now());
-            const data = await res.json();
-            const list = document.getElementById('targetList');
-            list.innerHTML = '';
-
-            data.forEach(t => {
-                const id = t.id.toString();
-                const prev = state.targets.get(id);
-                
-                // Розрахунок кінетики
-                let speed = 0;
-                let bearing = 0;
-                if (prev) {
-                    const dist = TacticalMath.getDist(prev, t);
-                    speed = (dist * 3600) / 5; // Припускаємо оновлення кожні 5 сек
-                    bearing = TacticalMath.getBearing(prev, t);
-                } else if (state.push) {
-                    new Notification("NEW CONTACT", { body: `${t.type}: ${t.label}` });
-                }
-
-                state.targets.set(id, { ...t, speed, bearing });
-                const distToBase = TacticalMath.getDist(homeBase, t);
-
-                // Рендер картки
-                const card = document.createElement('div');
-                card.className = `target-card ${t.status === 'active' ? 'active' : ''}`;
-                card.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--army-bright)">
-                        <span>ID: ${id.slice(-4)} // ${t.type}</span>
-                        <span>SPD: ${speed.toFixed(0)} KM/H</span>
-                    </div>
-                    <div style="font-size:15px; margin: 6px 0; color:#fff;">${t.label.split('|')[0]}</div>
-                    <div style="font-size:10px; opacity:0.8;">
-                        DIST: ${distToBase.toFixed(1)} KM // AZM: ${bearing.toFixed(0)}°
-                    </div>
-                `;
-                card.onclick = () => map.flyTo([t.lat, t.lng], 10);
-                list.appendChild(card);
-
-                // Рендер маркера з вектором
-                updateMarker(id, t, bearing, speed);
-            });
-        } catch (e) { console.error("SIGNAL_INTERRUPT"); }
+async function startBoot() {
+    const logBox = document.getElementById('boot-logs');
+    const fill = document.getElementById('p-fill');
+    for(let i=0; i < bootLogs.length; i++) {
+        const p = document.createElement('div');
+        logBox.appendChild(p);
+        await typeText(p, "> " + bootLogs[i]);
+        logBox.scrollTop = logBox.scrollHeight;
+        fill.style.width = ((i+1)/bootLogs.length * 100) + "%";
+        await new Promise(r => setTimeout(r, 200));
     }
+    setTimeout(() => {
+        const loader = document.getElementById('boot-loader');
+        loader.style.opacity = '0';
+        setTimeout(() => loader.remove(), 800);
+    }, 600);
+}
 
-    function updateMarker(id, t, bearing, speed) {
-        const iconPath = "img/" + (t.type || "unknown") + ".png"; // Спростив для прикладу
-        
-        if (!state.layers[id]) {
-            const icon = L.divIcon({
-                className: '',
-                html: `
-                    <div class="mil-icon-container">
-                        <div class="heading-vector" style="height:${Math.min(speed/5, 60)}px; transform:rotate(${bearing}deg)"></div>
-                        <div class="mil-icon-frame"></div>
-                        <img src="${iconPath}" class="mil-icon-img">
-                        <div class="mil-icon-label">${t.label.split('|')[1] || ''}</div>
-                    </div>`,
-                iconSize: [40, 40]
-            });
-            state.layers[id] = L.marker([t.lat, t.lng], { icon }).addTo(map);
-        } else {
-            const m = state.layers[id];
-            m.setLatLng([t.lat, t.lng]);
-            // Оновлення вектора всередині іконки
-            const vec = m.getElement().querySelector('.heading-vector');
-            if(vec) {
-                vec.style.height = `${Math.min(speed/5, 60)}px`;
-                vec.style.transform = `rotate(${bearing}deg)`;
-            }
-        }
-    }
+setInterval(() => {
+    document.getElementById('clock').innerText = new Date().toLocaleTimeString('uk-UA',{hour12:false}) + ' LCL';
+}, 1000);
 
-    function updateClock() {
-        document.getElementById('clock').innerText = new Date().toISOString().split('T')[1].split('.')[0] + ' ZULU';
-    }
+const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 10);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
 
-    setInterval(updateClock, 1000);
-    setInterval(syncTactical, 5000);
-    syncTactical();
+window.onload = startBoot;
 </script>
 </body>
 </html>
