@@ -1,6 +1,6 @@
 {
-  "short_name": "Neptun",
-  "name": "STRATCOM NEPTUN TACTICAL",
+  "short_name": "1654",
+  "name": "MONITOR KHARKIV 1654",
   "icons": [
     {
       "src": "img/LOGO.png",
@@ -22,3 +22,4 @@
   "description": "Tactical Air Defense Monitoring System"
 
 }
+
