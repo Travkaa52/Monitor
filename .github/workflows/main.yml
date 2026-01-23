@@ -2,9 +2,17 @@ name: NEPTUN_TACTICAL_OS
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # ЦЕ ОБОВ'ЯЗКОВО ДЛЯ КНОПКИ
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+# Це забороняє паралельні запуски
+concurrency:
+  group: neptun_production
+  cancel-in-progress: true
 
 jobs:
+# ... далі без змін
   run-bot:
     runs-on: ubuntu-latest
     permissions:
