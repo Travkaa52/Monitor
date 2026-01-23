@@ -2,8 +2,16 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>TACTICAL_OS | FIELD UNIT</title>
+    
+    <meta name="theme-color" content="#0d1109">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="manifest.json">
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&display=swap" rel="stylesheet">
+    
     <style>
         :root { 
             --army-bg: #0d1109; 
@@ -11,157 +19,207 @@
             --army-bright: #8a9a5b; 
             --hazard: #d2691e;
             --text: #c5c5c5;
+            --font-main: 'JetBrains Mono', monospace;
         }
 
         body { 
             margin: 0; background: var(--army-bg); color: var(--text);
-            font-family: "Courier New", monospace; /* Более технический шрифт */
-            font-weight: bold; overflow: hidden; text-transform: uppercase;
+            font-family: var(--font-main); font-weight: bold; overflow: hidden; text-transform: uppercase;
         }
 
-        body::before {
-            content: ""; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: url('https://www.transparenttextures.com/patterns/stardust.png');
-            opacity: 0.05; pointer-events: none; z-index: 2000;
+        /* Ефект старого ЕЛТ-монітора */
+        body::after {
+            content: " "; position: fixed; inset: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 3px 100%; pointer-events: none; z-index: 3000;
         }
 
-        #map { height: 100vh; width: 100%; filter: sepia(0.4) contrast(1.1) brightness(0.6); }
+        #map { height: 100vh; width: 100%; filter: sepia(0.3) contrast(1.2) brightness(0.7); }
 
         .status-header {
             position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-            background: rgba(13, 17, 9, 0.9); border-bottom: 2px solid var(--army-green);
-            padding: 8px 15px; display: flex; justify-content: space-between; font-size: 12px;
+            background: rgba(13, 17, 9, 0.95); border-bottom: 2px solid var(--army-green);
+            padding: 10px 15px; display: flex; justify-content: space-between; font-size: 11px;
         }
 
         .tactical-list {
-            position: fixed; right: 0; top: 35px; bottom: 0; width: 320px;
-            background: rgba(13, 17, 9, 0.95); border-left: 2px solid var(--army-green);
-            z-index: 1000; padding: 10px; overflow-y: auto;
+            position: fixed; right: 0; top: 40px; bottom: 85px; width: 320px;
+            background: rgba(13, 17, 9, 0.9); border-left: 2px solid var(--army-green);
+            z-index: 1000; padding: 10px; overflow-y: auto; scrollbar-width: none;
         }
+
+        /* Кнопка Донату */
+        .supply-btn {
+            position: fixed; bottom: 10px; right: 10px; width: 300px; height: 60px;
+            background: var(--army-green); color: #fff; border: 2px solid var(--army-bright);
+            display: flex; align-items: center; justify-content: center; z-index: 1001;
+            text-decoration: none; font-weight: 800; letter-spacing: 2px;
+        }
+        .supply-btn:hover { background: var(--army-bright); color: var(--army-bg); }
 
         .target-card {
-            border: 1px solid var(--army-green); background: rgba(0,0,0,0.4);
-            margin-bottom: 10px; padding: 10px; cursor: pointer;
+            border: 1px solid var(--army-green); background: rgba(0,0,0,0.5);
+            margin-bottom: 10px; padding: 12px; cursor: pointer; transition: 0.2s;
         }
+        .target-card.active { border-left: 6px solid var(--hazard); background: rgba(210, 105, 30, 0.1); }
 
-        .target-card.active { border-left: 6px solid var(--hazard); background: rgba(75, 83, 32, 0.1); }
-
-        /* Контейнер для иконки на карте */
-        .mil-icon-container {
-            position: relative; width: 40px; height: 40px;
-            display: flex; justify-content: center; align-items: center;
-        }
-
-        /* Рамка вокруг вашей картинки в военном стиле */
-        .mil-icon-frame {
-            position: absolute; width: 36px; height: 36px;
-            border: 1px solid var(--army-bright);
-            background: rgba(13, 17, 9, 0.6);
-            transform: rotate(45deg); /* Ромб */
-        }
-
-        .mil-icon-img {
-            position: relative; width: 28px; height: 28px; z-index: 5;
-            filter: drop-shadow(0 0 2px var(--army-bg));
+        /* Векторний маркер */
+        .mil-icon-container { position: relative; width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; }
+        .mil-icon-frame { position: absolute; width: 34px; height: 34px; border: 2px solid var(--army-bright); transform: rotate(45deg); background: rgba(13,17,9,0.5); }
+        .mil-icon-img { position: relative; width: 26px; height: 26px; z-index: 5; }
+        
+        /* Лінія вектора руху */
+        .heading-vector {
+            position: absolute; bottom: 50%; width: 2px; 
+            background: var(--hazard); transform-origin: bottom;
+            filter: drop-shadow(0 0 5px var(--hazard));
         }
 
         .mil-icon-label {
-            position: absolute; top: 42px; background: var(--army-bg);
-            border: 1px solid var(--army-green); padding: 1px 4px;
-            font-size: 9px; white-space: nowrap; color: var(--army-bright);
+            position: absolute; top: 45px; background: var(--army-bg);
+            border: 1px solid var(--army-green); padding: 1px 6px;
+            font-size: 10px; color: var(--army-bright); box-shadow: 2px 2px 0 #000;
         }
 
-        .scan-line {
-            position: fixed; width: 100%; height: 4px; background: rgba(138, 154, 91, 0.05);
-            top: 0; z-index: 1500; animation: scan 6s linear infinite;
+        @media (max-width: 768px) {
+            .tactical-list { width: 100%; height: 30vh; top: auto; bottom: 80px; border-left: none; border-top: 2px solid var(--army-green); }
+            .supply-btn { width: calc(100% - 20px); left: 10px; }
         }
-        @keyframes scan { from { top: 0; } to { top: 100%; } }
     </style>
 </head>
 <body>
 
-<div class="scan-line"></div>
 <div class="status-header">
-    <div>SYSTEM: NEPTUN_FIELD_v3.0 // AUTH: ADM_5423</div>
-    <div id="clock">00:00:00 ZULU</div>
+    <div>[ UNIT:MONITOR KHARKIV 1654 ] // STATUS: NOMINAL</div>
+    <div id="notif-trigger" onclick="requestPush()" style="cursor:pointer; color:var(--hazard)">[ ENABLE ALERTS ]</div>
+    <div id="clock">00:00:00 1488</div>
 </div>
 
 <div class="tactical-list" id="targetList"></div>
+
+<a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="supply-btn">
+    ДОПОМОГА ПРОЕКТУ [DONATE]
+</a>
+
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 10);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
-
-    let layers = {};
-    const iconFiles = {
-        "air_defense": "img/images.png",
-        "drone": "img/drone.png",
-        "missile": "img/missile.png",
-        "kab": "img/kab.png",
-        "aircraft": "img/aircraft.png",
-        "unknown": "img/unknown.png"
+    // --- Tactical Math Module ---
+    const TacticalMath = {
+        getDist: (p1, p2) => {
+            const R = 6371;
+            const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+            const dLon = (p2.lng - p1.lng) * Math.PI / 180;
+            const a = Math.sin(dLat/2)**2 + Math.cos(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        },
+        getBearing: (p1, p2) => {
+            const y = Math.sin((p2.lng-p1.lng)*Math.PI/180) * Math.cos(p2.lat*Math.PI/180);
+            const x = Math.cos(p1.lat*Math.PI/180)*Math.sin(p2.lat*Math.PI/180) - Math.sin(p1.lat*Math.PI/180)*Math.cos(p2.lat*Math.PI/180)*Math.cos((p2.lng-p1.lng)*Math.PI/180);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
     };
 
-    function updateClock() {
-        const now = new Date();
-        document.getElementById('clock').innerText = now.toISOString().split('T')[1].split('.')[0] + ' ZULU';
-    }
-    setInterval(updateClock, 1000);
+    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 8);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
 
-    async function refresh() {
+    let state = { targets: new Map(), layers: {}, push: false };
+    const homeBase = { lat: 49.99, lng: 36.23 }; // Твоя локація
+
+    function requestPush() {
+        Notification.requestPermission().then(p => { 
+            if(p === 'granted') {
+                state.push = true;
+                document.getElementById('notif-trigger').innerText = "[ ALERTS ACTIVE ]";
+                document.getElementById('notif-trigger').style.color = "var(--army-bright)";
+            }
+        });
+    }
+
+    async function syncTactical() {
         try {
-            const res = await fetch('targets.json?t=' + Date.now());
+            const res = await fetch('targets.json?v=' + Date.now());
             const data = await res.json();
             const list = document.getElementById('targetList');
             list.innerHTML = '';
 
-            const currentIds = data.map(t => t.id.toString());
-            
-            Object.keys(layers).forEach(id => {
-                if (!currentIds.includes(id)) {
-                    map.removeLayer(layers[id].marker);
-                    delete layers[id];
-                }
-            });
-
             data.forEach(t => {
                 const id = t.id.toString();
-                const pos = [t.lat, t.lng];
-                const isActive = t.status === 'active';
-                const iconPath = iconFiles[t.type] || iconFiles["unknown"];
-
-                if (!layers[id]) {
-                    const customIcon = L.divIcon({
-                        className: '',
-                        html: `
-                            <div class="mil-icon-container">
-                                <div class="mil-icon-frame" style="${isActive ? 'border-color:var(--hazard);' : ''}"></div>
-                                <img src="${iconPath}" class="mil-icon-img" style="${!isActive ? 'filter:grayscale(1) opacity(0.5);' : ''}">
-                                <div class="mil-icon-label">${t.label.split('|')[1] || ''}</div>
-                            </div>`,
-                        iconSize: [40, 40]
-                    });
-                    const marker = L.marker(pos, {icon: customIcon}).addTo(map);
-                    layers[id] = { marker };
+                const prev = state.targets.get(id);
+                
+                // Розрахунок кінетики
+                let speed = 0;
+                let bearing = 0;
+                if (prev) {
+                    const dist = TacticalMath.getDist(prev, t);
+                    speed = (dist * 3600) / 5; // Припускаємо оновлення кожні 5 сек
+                    bearing = TacticalMath.getBearing(prev, t);
+                } else if (state.push) {
+                    new Notification("NEW CONTACT", { body: `${t.type}: ${t.label}` });
                 }
 
+                state.targets.set(id, { ...t, speed, bearing });
+                const distToBase = TacticalMath.getDist(homeBase, t);
+
+                // Рендер картки
                 const card = document.createElement('div');
-                card.className = `target-card ${isActive ? 'active' : ''}`;
+                card.className = `target-card ${t.status === 'active' ? 'active' : ''}`;
                 card.innerHTML = `
-                    <div style="font-size:11px; color:var(--army-bright)">[ ${t.time} ] OBJ_${id.slice(-4)}</div>
-                    <div style="font-size:14px; margin: 4px 0;">${t.label.split('|')[0]}</div>
-                    <div style="font-size:10px; opacity:0.7;">QTY: ${t.count} // GRID: ${t.lat.toFixed(3)}N ${t.lng.toFixed(3)}E</div>
+                    <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--army-bright)">
+                        <span>ID: ${id.slice(-4)} // ${t.type}</span>
+                        <span>SPD: ${speed.toFixed(0)} KM/H</span>
+                    </div>
+                    <div style="font-size:15px; margin: 6px 0; color:#fff;">${t.label.split('|')[0]}</div>
+                    <div style="font-size:10px; opacity:0.8;">
+                        DIST: ${distToBase.toFixed(1)} KM // AZM: ${bearing.toFixed(0)}°
+                    </div>
                 `;
-                card.onclick = () => map.flyTo(pos, 12);
+                card.onclick = () => map.flyTo([t.lat, t.lng], 10);
                 list.appendChild(card);
+
+                // Рендер маркера з вектором
+                updateMarker(id, t, bearing, speed);
             });
-        } catch (e) { console.error("Sync Error"); }
+        } catch (e) { console.error("SIGNAL_INTERRUPT"); }
     }
 
-    setInterval(refresh, 5000);
-    refresh();
+    function updateMarker(id, t, bearing, speed) {
+        const iconPath = "img/" + (t.type || "unknown") + ".png"; // Спростив для прикладу
+        
+        if (!state.layers[id]) {
+            const icon = L.divIcon({
+                className: '',
+                html: `
+                    <div class="mil-icon-container">
+                        <div class="heading-vector" style="height:${Math.min(speed/5, 60)}px; transform:rotate(${bearing}deg)"></div>
+                        <div class="mil-icon-frame"></div>
+                        <img src="${iconPath}" class="mil-icon-img">
+                        <div class="mil-icon-label">${t.label.split('|')[1] || ''}</div>
+                    </div>`,
+                iconSize: [40, 40]
+            });
+            state.layers[id] = L.marker([t.lat, t.lng], { icon }).addTo(map);
+        } else {
+            const m = state.layers[id];
+            m.setLatLng([t.lat, t.lng]);
+            // Оновлення вектора всередині іконки
+            const vec = m.getElement().querySelector('.heading-vector');
+            if(vec) {
+                vec.style.height = `${Math.min(speed/5, 60)}px`;
+                vec.style.transform = `rotate(${bearing}deg)`;
+            }
+        }
+    }
+
+    function updateClock() {
+        document.getElementById('clock').innerText = new Date().toISOString().split('T')[1].split('.')[0] + ' ZULU';
+    }
+
+    setInterval(updateClock, 1000);
+    setInterval(syncTactical, 5000);
+    syncTactical();
 </script>
 </body>
 </html>
