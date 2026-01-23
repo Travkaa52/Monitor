@@ -1,21 +1,28 @@
 name: NEPTUN_TACTICAL_OS
+
 on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 */6 * * *' # Авто-перезапуск кожні 6 годин
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Дозволяє запускати бота вручну кнопкою!
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Надаємо боту право зберігати файли в репозиторій
     steps:
       - uses: actions/checkout@v3
+      
       - name: Install Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+          
       - name: Install Deps
         run: pip install telethon
+        
       - name: Start Neptun
         env:
           API_ID: ${{ secrets.API_ID }}
