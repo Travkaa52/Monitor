@@ -1,0 +1,205 @@
+import asyncio
+import json
+import os
+import re
+import threading
+import logging
+from datetime import datetime, timedelta
+from http.server import SimpleHTTPRequestHandler
+from socketserver import TCPServer
+from telethon import TelegramClient, events, Button
+
+# Налаштування логів
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("NEPTUN")
+
+# ================= КОНФІГУРАЦІЯ =================
+API_ID = 25635427
+API_HASH = 'e2f99fb35400e6628c88ffd388308598'
+BOT_TOKEN = '8377487187:AAFEd-mRZjJaJ_xC0931IkFlLyr09Lwnnwo'
+CHANNEL_ID = 'https://t.me/monitorkh1654'
+ADMIN_ID = 5423792783
+PORT = 8000
+
+client = TelegramClient('bot_session', API_ID, API_HASH)
+db_lock = threading.Lock()
+
+SYMBOLS = {
+    "air_defense": "💥 ППО",
+    "drone": "🛵 Мопед",
+    "missile": "🚀 Ракета",
+    "kab": "☄️ КАБ",
+    "mrls": "🔥 РСЗВ",
+    "recon": "🛸 Розвідка",
+    "aircraft": "✈️ Авіація",
+    "unknown": "❓ Невідомо"
+}
+
+pending_data = {}
+delete_queue = {}
+
+# ================= БЕЗПЕЧНА РОБОТА З БД =================
+def db(file, data=None):
+    with db_lock:
+        try:
+            if data is None:
+                if not os.path.exists(file): return [] if file == 'targets.json' else {}
+                with open(file, 'r', encoding='utf-8') as f: return json.load(f)
+            else:
+                with open(file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Помилка БД ({file}): {e}")
+            return [] if file == 'targets.json' else {}
+
+# ================= ДОПОМІЖНІ ФУНКЦІЇ =================
+def extract_count(text):
+    match = re.search(r'(\d+)', text)
+    return int(match.group(1)) if match else 1
+
+def advanced_parse(text):
+    clean = re.sub(r'(🚨|⚠️|Увага|На даний час|зафіксовано|рух|вектор|напрямок|бпла|тип)', '', text, flags=re.IGNORECASE).strip()
+    return re.sub(r'["\'«»]', '', clean.split('курсом')[0].split('на')[0].strip())
+
+# ================= ОСНОВНИЙ МОНІТОРИНГ =================
+@client.on(events.NewMessage(chats=CHANNEL_ID))
+async def monitor(event):
+    raw_text = event.raw_text
+    text = raw_text.lower()
+    geo_db = db('geo.json')
+    types_db = db('types.json')
+    
+    found_points = []
+    final_type = None
+
+    # 1. Пріоритет: ППО та Авіація
+    if any(word in text for word in ["робота ппо", "працює ппо"]):
+        final_type = "air_defense"
+        if any(bnr in text for bnr in ["бнр", "белгород", "бєлгород"]):
+            found_points = [geo_db.get("бнр", [50.59, 36.58, "БНР"])]
+    
+    if not final_type and "активність" in text and "авіації" in text:
+        final_type = "aircraft"
+        if "бнр" in text: found_points = [geo_db.get("бнр", [50.59, 36.58, "БНР"])]
+        elif "схід" in text: found_points = [geo_db.get("східному напрямку", [49.27, 38.91, "Схід"])]
+
+    # 2. Пошук точок
+    if not found_points:
+        for k in sorted(geo_db.keys(), key=len, reverse=True):
+            if k in text: found_points.append(geo_db[k])
+    
+    if not found_points: return
+
+    # 3. Визначення типу
+    if not final_type:
+        for t_type, keywords in types_db.items():
+            if any(word in text for word in keywords):
+                final_type = t_type
+                break
+    
+    # 4. Навчання, якщо тип невідомий
+    if not final_type:
+        threat_name = advanced_parse(raw_text)
+        pending_data[ADMIN_ID] = {"term": threat_name.lower(), "lat": found_points[-1][0], "lng": found_points[-1][1], "place": found_points[-1][2]}
+        btns = [[Button.inline("🛵 Дрон", "add:drone"), Button.inline("🚀 Ракета", "add:missile")],
+                [Button.inline("☄️ КАБ", "add:kab"), Button.inline("💥 ППО", "add:air_defense")],
+                [Button.inline("❌ Ігнор", "cancel")]]
+        await client.send_message(ADMIN_ID, f"❓ **Новий тип!**\nТекст: `{raw_text}`", buttons=btns)
+        return
+
+    # 5. Збереження
+    minutes = 20 if final_type == "air_defense" else (60 if final_type == "aircraft" else 45)
+    new_target = {
+        "id": event.id, "type": final_type, "count": extract_count(raw_text),
+        "status": "active", "reason": "", "lat": found_points[-1][0], "lng": found_points[-1][1],
+        "label": f"{SYMBOLS[final_type]} | {' ➜ '.join([p[2] for p in found_points])}",
+        "time": datetime.now().strftime("%H:%M"),
+        "expire_at": (datetime.now() + timedelta(minutes=minutes)).isoformat()
+    }
+    
+    targets = db('targets.json')
+    targets.append(new_target)
+    db('targets.json', targets)
+    logger.info(f"Додано: {new_target['label']}")
+
+# ================= КЕРУВАННЯ (CALLBACKS) =================
+@client.on(events.CallbackQuery)
+async def callback_handler(event):
+    data = event.data.decode()
+    uid = event.sender_id
+    targets = db('targets.json')
+
+    if data.startswith("edit_cnt:"):
+        _, act, tid = data.split(":")
+        for t in targets:
+            if t['id'] == int(tid):
+                if act == "plus": t['count'] += 1
+                elif act == "minus" and t['count'] > 1: t['count'] -= 1
+                
+                btns = [[Button.inline("➕", f"edit_cnt:plus:{tid}"), Button.inline("➖", f"edit_cnt:minus:{tid}")],
+                        [Button.inline("🗑 Видалити", f"ask_del:{tid}")]]
+                await event.edit(f"📡 **Ціль:** {t['label']}\n🔢 Кількість: **{t['count']}**", buttons=btns)
+                db('targets.json', targets)
+                break
+
+    elif data.startswith("ask_del:"):
+        tid = int(data.split(":")[1])
+        delete_queue[uid] = tid
+        btns = [[Button.inline("✅ Знищено", "kill:Знищено"), Button.inline("📉 Впало", "kill:Впало")],
+                [Button.inline("⬅️ Назад", f"back:{tid}")]]
+        await event.edit("⚠️ **Причина видалення:**", buttons=btns)
+
+    elif data.startswith("kill:"):
+        reason = data.split(":")[1]
+        tid = delete_queue.pop(uid, None)
+        if tid:
+            for t in targets:
+                if t['id'] == tid:
+                    t['status'] = 'archived'
+                    t['reason'] = reason
+                    t['expire_at'] = (datetime.now() + timedelta(minutes=5)).isoformat()
+            db('targets.json', targets)
+            await event.edit(f"📥 Архів: {reason}")
+
+    elif data.startswith("add:"):
+        cat = data.split(":")[1]
+        info = pending_data.pop(uid, None)
+        if info:
+            t_db = db('types.json')
+            if cat not in t_db: t_db[cat] = []
+            t_db[cat].append(info['term'])
+            db('types.json', t_db)
+            await event.edit(f"✅ Тип `{info['term']}` додано до {SYMBOLS[cat]}")
+
+# ================= АДМІН-ПАНЕЛЬ =================
+@client.on(events.NewMessage(from_users=ADMIN_ID))
+async def admin_panel(event):
+    if event.raw_text in ['/1', r'\1']:
+        targets = db('targets.json')
+        active = [t for t in targets if t['status'] == 'active']
+        if not active: return await event.reply("📭 Активних цілей немає.")
+        
+        for t in active:
+            btns = [[Button.inline("➕", f"edit_cnt:plus:{t['id']}"), Button.inline("➖", f"edit_cnt:minus:{t['id']}")],
+                    [Button.inline("🗑 Видалити", f"ask_del:{t['id']}")]]
+            await event.reply(f"📡 **Ціль:** {t['label']}\n🔢 Кількість: **{t['count']}**", buttons=btns)
+
+# ================= СЕРВЕР ТА ОЧИЩЕННЯ =================
+def cleanup_worker():
+    while True:
+        now = datetime.now()
+        t_list = db('targets.json')
+        if t_list:
+            filtered = [t for t in t_list if datetime.fromisoformat(t['expire_at']) > now]
+            if len(filtered) != len(t_list): db('targets.json', filtered)
+        threading.Event().wait(30)
+
+async def main():
+    threading.Thread(target=cleanup_worker, daemon=True).start()
+    threading.Thread(target=lambda: TCPServer(("", PORT), SimpleHTTPRequestHandler).serve_forever(), daemon=True).start()
+    await client.start(bot_token=BOT_TOKEN)
+    logger.info("💎 NEPTUN TACTICAL READY")
+    await client.run_until_disconnected()
+
+if __name__ == '__main__':
+    asyncio.run(main())

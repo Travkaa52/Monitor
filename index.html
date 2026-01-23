@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>TACTICAL_OS | FIELD UNIT</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <style>
+        :root { 
+            --army-bg: #0d1109; 
+            --army-green: #4b5320; 
+            --army-bright: #8a9a5b; 
+            --hazard: #d2691e;
+            --text: #c5c5c5;
+        }
+
+        body { 
+            margin: 0; background: var(--army-bg); color: var(--text);
+            font-family: "Courier New", monospace; /* Более технический шрифт */
+            font-weight: bold; overflow: hidden; text-transform: uppercase;
+        }
+
+        body::before {
+            content: ""; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: url('https://www.transparenttextures.com/patterns/stardust.png');
+            opacity: 0.05; pointer-events: none; z-index: 2000;
+        }
+
+        #map { height: 100vh; width: 100%; filter: sepia(0.4) contrast(1.1) brightness(0.6); }
+
+        .status-header {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+            background: rgba(13, 17, 9, 0.9); border-bottom: 2px solid var(--army-green);
+            padding: 8px 15px; display: flex; justify-content: space-between; font-size: 12px;
+        }
+
+        .tactical-list {
+            position: fixed; right: 0; top: 35px; bottom: 0; width: 320px;
+            background: rgba(13, 17, 9, 0.95); border-left: 2px solid var(--army-green);
+            z-index: 1000; padding: 10px; overflow-y: auto;
+        }
+
+        .target-card {
+            border: 1px solid var(--army-green); background: rgba(0,0,0,0.4);
+            margin-bottom: 10px; padding: 10px; cursor: pointer;
+        }
+
+        .target-card.active { border-left: 6px solid var(--hazard); background: rgba(75, 83, 32, 0.1); }
+
+        /* Контейнер для иконки на карте */
+        .mil-icon-container {
+            position: relative; width: 40px; height: 40px;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        /* Рамка вокруг вашей картинки в военном стиле */
+        .mil-icon-frame {
+            position: absolute; width: 36px; height: 36px;
+            border: 1px solid var(--army-bright);
+            background: rgba(13, 17, 9, 0.6);
+            transform: rotate(45deg); /* Ромб */
+        }
+
+        .mil-icon-img {
+            position: relative; width: 28px; height: 28px; z-index: 5;
+            filter: drop-shadow(0 0 2px var(--army-bg));
+        }
+
+        .mil-icon-label {
+            position: absolute; top: 42px; background: var(--army-bg);
+            border: 1px solid var(--army-green); padding: 1px 4px;
+            font-size: 9px; white-space: nowrap; color: var(--army-bright);
+        }
+
+        .scan-line {
+            position: fixed; width: 100%; height: 4px; background: rgba(138, 154, 91, 0.05);
+            top: 0; z-index: 1500; animation: scan 6s linear infinite;
+        }
+        @keyframes scan { from { top: 0; } to { top: 100%; } }
+    </style>
+</head>
+<body>
+
+<div class="scan-line"></div>
+<div class="status-header">
+    <div>SYSTEM: NEPTUN_FIELD_v3.0 // AUTH: ADM_5423</div>
+    <div id="clock">00:00:00 ZULU</div>
+</div>
+
+<div class="tactical-list" id="targetList"></div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 10);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+    let layers = {};
+    const iconFiles = {
+        "air_defense": "img/images.png",
+        "drone": "img/drone.png",
+        "missile": "img/missile.png",
+        "kab": "img/kab.png",
+        "aircraft": "img/aircraft.png",
+        "unknown": "img/unknown.png"
+    };
+
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('clock').innerText = now.toISOString().split('T')[1].split('.')[0] + ' ZULU';
+    }
+    setInterval(updateClock, 1000);
+
+    async function refresh() {
+        try {
+            const res = await fetch('targets.json?t=' + Date.now());
+            const data = await res.json();
+            const list = document.getElementById('targetList');
+            list.innerHTML = '';
+
+            const currentIds = data.map(t => t.id.toString());
+            
+            Object.keys(layers).forEach(id => {
+                if (!currentIds.includes(id)) {
+                    map.removeLayer(layers[id].marker);
+                    delete layers[id];
+                }
+            });
+
+            data.forEach(t => {
+                const id = t.id.toString();
+                const pos = [t.lat, t.lng];
+                const isActive = t.status === 'active';
+                const iconPath = iconFiles[t.type] || iconFiles["unknown"];
+
+                if (!layers[id]) {
+                    const customIcon = L.divIcon({
+                        className: '',
+                        html: `
+                            <div class="mil-icon-container">
+                                <div class="mil-icon-frame" style="${isActive ? 'border-color:var(--hazard);' : ''}"></div>
+                                <img src="${iconPath}" class="mil-icon-img" style="${!isActive ? 'filter:grayscale(1) opacity(0.5);' : ''}">
+                                <div class="mil-icon-label">${t.label.split('|')[1] || ''}</div>
+                            </div>`,
+                        iconSize: [40, 40]
+                    });
+                    const marker = L.marker(pos, {icon: customIcon}).addTo(map);
+                    layers[id] = { marker };
+                }
+
+                const card = document.createElement('div');
+                card.className = `target-card ${isActive ? 'active' : ''}`;
+                card.innerHTML = `
+                    <div style="font-size:11px; color:var(--army-bright)">[ ${t.time} ] OBJ_${id.slice(-4)}</div>
+                    <div style="font-size:14px; margin: 4px 0;">${t.label.split('|')[0]}</div>
+                    <div style="font-size:10px; opacity:0.7;">QTY: ${t.count} // GRID: ${t.lat.toFixed(3)}N ${t.lng.toFixed(3)}E</div>
+                `;
+                card.onclick = () => map.flyTo(pos, 12);
+                list.appendChild(card);
+            });
+        } catch (e) { console.error("Sync Error"); }
+    }
+
+    setInterval(refresh, 5000);
+    refresh();
+</script>
+</body>
+</html>

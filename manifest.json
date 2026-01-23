@@ -1,0 +1,23 @@
+{
+  "short_name": "Neptun",
+  "name": "STRATCOM NEPTUN TACTICAL",
+  "icons": [
+    {
+      "src": "img/drone.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "img/drone.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/index.html",
+  "background_color": "#02060a",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#00f2ff",
+  "description": "Tactical Air Defense Monitoring System"
+}

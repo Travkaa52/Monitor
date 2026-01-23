@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Моніторинг повітряної обстановки</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: #0b141a; color: white; }
+        #map { height: 100vh; width: 100%; }
+        
+        .overlay-ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(11, 20, 26, 0.9);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #ff4757;
+            backdrop-filter: blur(10px);
+            min-width: 280px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            background: #ff4757;
+            border-radius: 20px;
+            font-size: 0.8em;
+            margin-bottom: 10px;
+            font-weight: bold;
+            animation: pulse 2s infinite;
+        }
+
+        .target-item {
+            background: rgba(255, 255, 255, 0.05);
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            border-left: 3px solid #ffa502;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .target-item img {
+            width: 30px;
+            height: 30px;
+            object-fit: contain;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
+        .leaflet-popup-content-wrapper { background: #1e272e; color: white; border: 1px solid #ff4757; }
+        .leaflet-popup-tip { background: #ff4757; }
+        
+        /* Стиль для іконок на карті */
+        .map-icon {
+            filter: drop-shadow(0 0 5px rgba(255, 71, 87, 0.8));
+            transition: all 0.3s;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="overlay-ui">
+        <div class="status-badge"><i class="fas fa-broadcast-tower"></i> LIVE: МОНІТОР КАНАЛУ</div>
+        <h2 style="margin: 0 0 10px 0; color: #ff4757; font-size: 1.4em;">Повітряна Обстановка</h2>
+        <div id="stats">
+            Активних цілей: <span id="count" style="font-weight: bold; color: #ffa502;">0</span><br>
+            <small style="opacity: 0.7;">Оновлено: <span id="time">--:--:--</span></small>
+        </div>
+        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 15px 0;">
+        <div id="targets-list"></div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Ініціалізація карти (Центр - Україна)
+        const map = L.map('map', {
+            zoomControl: false
+        }).setView([48.3794, 31.1656], 6);
+        
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // Темна тема карти
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        let markers = [];
+
+        async function updateData() {
+            try {
+                // Додаємо timestamp, щоб уникнути кешування файлу браузером
+                const response = await fetch('targets.json?nocache=' + new Date().getTime());
+                if (!response.ok) throw new Error("Файл не знайдено");
+                
+                const data = await response.json();
+                
+                // Видаляємо старі маркери
+                markers.forEach(m => map.removeLayer(m));
+                markers = [];
+                const listContainer = document.getElementById('targets-list');
+                listContainer.innerHTML = '';
+
+                data.forEach(target => {
+                    // Визначаємо шлях до картинки залежно від типу цілі
+                    const imgPath = target.type === 'missile' ? 'img/missile.png' : 'img/drone.png';
+                    const typeLabel = target.type === 'missile' ? 'Ракета' : 'БПЛА / Шахед';
+
+                    // Створюємо іконку для карти
+                    const customIcon = L.icon({
+                        iconUrl: imgPath,
+                        iconSize: [40, 40],
+                        iconAnchor: [20, 20],
+                        popupAnchor: [0, -20],
+                        className: 'map-icon'
+                    });
+
+                    // Додаємо маркер на карту
+                    const marker = L.marker([target.lat, target.lng], { icon: customIcon })
+                        .addTo(map)
+                        .bindPopup(`
+                            <div style="text-align: center; color: white;">
+                                <img src="${imgPath}" width="40" style="margin-bottom: 5px;"><br>
+                                <strong style="color: #ff4757; font-size: 1.1em;">${target.label}</strong><br>
+                                <b>Тип:</b> ${typeLabel}<br>
+                                <b>Час:</b> ${target.time}
+                            </div>
+                        `);
+                    
+                    markers.push(marker);
+
+                    // Додаємо елемент у список в інтерфейсі
+                    const item = document.createElement('div');
+                    item.className = 'target-item';
+                    item.style.borderLeftColor = target.type === 'missile' ? '#ff4757' : '#ffa502';
+                    item.innerHTML = `
+                        <img src="${imgPath}" alt="icon">
+                        <div>
+                            <div style="font-weight: bold;">${target.label}</div>
+                            <div style="font-size: 0.8em; opacity: 0.8;">${typeLabel} • ${target.time}</div>
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+
+                // Оновлюємо статистику
+                document.getElementById('count').innerText = data.length;
+                document.getElementById('time').innerText = new Date().toLocaleTimeString('uk-UA');
+
+            } catch (err) {
+                console.warn("Очікування даних або помилка файлу...");
+            }
+        }
+
+        // Оновлюємо кожні 5 секунд
+        setInterval(updateData, 5000);
+        updateData();
+    </script>
+</body>
+</html>
