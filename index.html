@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>NEPTUN | ТАКТИЧНИЙ ІНТЕРФЕЙС</title>
+    <title>MONITOR KHARKIV | TACTICAL</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -16,6 +16,7 @@
             --multicam-olive: #708238;
             --army-bg: #1a1c12;
             --hazard: #d2691e;
+            --danger: #ff3c3c;
             --font: 'JetBrains Mono', monospace;
         }
 
@@ -34,87 +35,100 @@
         #loader {
             position: fixed; inset: 0; background: #000; z-index: 10000;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            transition: opacity 0.8s ease, visibility 0.8s;
+            transition: opacity 1s ease, visibility 1s;
         }
 
         .terminal-box {
-            width: 90%; max-width: 500px; height: 340px;
-            border: 1px solid var(--multicam-dark); background: rgba(10, 10, 5, 0.9);
-            padding: 20px; position: relative; overflow: hidden;
+            width: 90%; max-width: 500px; height: 360px;
+            border: 1px solid var(--multicam-dark); background: rgba(10, 10, 5, 0.95);
+            padding: 25px; position: relative; overflow: hidden;
         }
 
-        .terminal-header { color: var(--hazard); font-size: 14px; margin-bottom: 15px; border-bottom: 1px solid var(--multicam-dark); padding-bottom: 5px; }
-        .terminal-logs { font-size: 11px; line-height: 1.8; color: var(--khaki); }
-        .log-line { margin-bottom: 4px; display: none; }
+        .terminal-header { color: var(--hazard); font-size: 14px; margin-bottom: 20px; border-bottom: 1px solid var(--multicam-dark); padding-bottom: 8px; display: flex; justify-content: space-between; }
+        .terminal-logs { font-size: 11px; line-height: 2; color: var(--khaki); }
+        .log-line { margin-bottom: 6px; display: none; }
         .log-success { color: var(--multicam-olive); font-weight: bold; }
-        .log-warn { color: var(--hazard); }
-
+        
         .scan-bar {
             position: absolute; bottom: 0; left: 0; height: 2px; width: 100%;
             background: var(--hazard); box-shadow: 0 0 15px var(--hazard);
-            animation: scan-move 2s infinite ease-in-out;
+            animation: scan-move 2.5s infinite ease-in-out;
         }
 
         @keyframes scan-move { 0% { bottom: 0; } 50% { bottom: 100%; } 100% { bottom: 0; } }
         .loader-hidden { opacity: 0; visibility: hidden; }
 
         /* ІНТЕРФЕЙС МАПИ */
-        .grid-overlay { position: fixed; inset: 0; background-image: radial-gradient(var(--multicam-dark) 1px, transparent 1px); background-size: 25px 25px; opacity: 0.2; pointer-events: none; z-index: 2; }
-        #map { position: absolute; inset: 0; z-index: 1; background: #0f1108; transition: filter 0.5s ease; }
-        .map-dark { filter: sepia(0.4) contrast(1.1) brightness(0.8); }
-        .map-light { filter: none; }
+        #map { position: absolute; inset: 0; z-index: 1; background: #000; transition: filter 0.5s ease; }
+        .map-tactical { filter: sepia(0.3) contrast(1.1) brightness(0.8); }
+        .map-normal { filter: none; }
 
-        /* HUD ЕЛЕМЕНТИ */
-        .hud-overlay { position: absolute; top: 10px; left: 10px; z-index: 1000; pointer-events: none; }
+        .grid-overlay { position: fixed; inset: 0; background-image: radial-gradient(var(--multicam-dark) 1px, transparent 1px); background-size: 25px 25px; opacity: 0.15; pointer-events: none; z-index: 2; }
+
+        .leaflet-marker-icon { transition: all 1s linear; }
+
+        /* HUD */
+        .hud-overlay { position: absolute; top: 10px; left: 10px; z-index: 1000; pointer-events: none; width: 260px; }
         .hud-card {
             background: rgba(26, 28, 18, 0.95); border: 2px solid var(--coyote); padding: 10px; margin-bottom: 8px;
-            backdrop-filter: blur(5px); min-width: 260px; pointer-events: auto;
+            backdrop-filter: blur(5px); pointer-events: auto;
             clip-path: polygon(0 0, 95% 0, 100% 20%, 100% 100%, 5% 100%, 0 80%);
         }
         .hud-title { font-size: 10px; font-weight: 700; border-bottom: 1px solid var(--multicam-dark); margin-bottom: 6px; padding-bottom: 4px; display: flex; justify-content: space-between; }
         .status-line { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 3px; }
 
-        /* КНОПКА ДОНАТУ */
-        .donate-btn {
-            position: absolute; top: 130px; right: 10px; z-index: 1000;
-            background: var(--hazard); color: #000; border: 1px solid #000;
-            padding: 12px 18px; font-family: var(--font); font-size: 11px; font-weight: 800;
-            text-decoration: none; cursor: pointer;
-            clip-path: polygon(10% 0, 100% 0, 100% 75%, 90% 100%, 0 100%, 0 25%);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5); transition: 0.3s;
-            display: flex; align-items: center; gap: 8px;
+        /* КАРТКА НЕБЕЗПЕКИ */
+        .danger-card { border: 2px solid var(--danger); color: var(--danger); background: rgba(255, 60, 60, 0.1); }
+        .critical-alert { animation: pulse-danger 0.8s infinite alternate; box-shadow: 0 0 20px rgba(255, 60, 60, 0.4); }
+        
+        @keyframes pulse-danger { 
+            from { border-color: var(--danger); opacity: 0.8; } 
+            to { border-color: #fff; opacity: 1; transform: scale(1.02); } 
         }
-        .donate-btn:hover { background: var(--khaki); transform: translateY(-2px); box-shadow: 0 0 20px var(--hazard); }
-        .donate-pulse { width: 8px; height: 8px; background: #000; border-radius: 50%; animation: pulse-ring 1.5s infinite; }
-        @keyframes pulse-ring { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
 
-        /* ПАНЕЛЬ КЕРУВАННЯ */
+        /* ПЕРЕМИКАЧ ШАРІВ */
+        .layer-switch {
+            position: absolute; top: 10px; right: 100px; z-index: 1000;
+            display: flex; gap: 4px; background: rgba(0,0,0,0.7); padding: 4px; border: 1px solid var(--coyote);
+        }
+        .layer-btn {
+            background: var(--multicam-dark); color: var(--khaki); border: none;
+            padding: 6px 10px; font-size: 9px; cursor: pointer; font-family: var(--font);
+        }
+        .layer-btn.active { background: var(--hazard); color: #000; font-weight: bold; }
+
+        .donate-btn {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            background: var(--hazard); color: #000; border: 1px solid #000;
+            padding: 8px 12px; font-size: 10px; font-weight: 800; text-decoration: none;
+            clip-path: polygon(10% 0, 100% 0, 100% 75%, 90% 100%, 0 100%, 0 25%);
+        }
+
         .control-panel {
             position: absolute; bottom: 0; left: 0; right: 0;
             background: #1a1c12; border-top: 3px solid var(--multicam-dark);
             padding: 12px 10px env(safe-area-inset-bottom);
             z-index: 1000; display: flex; gap: 6px;
         }
-        .control-btn {
-            background: var(--multicam-dark); border: 1px solid var(--coyote);
-            color: var(--khaki); flex: 1; padding: 14px 5px; font-size: 9px; font-weight: 700; cursor: pointer;
+        .control-btn { 
+            background: var(--multicam-dark); border: 1px solid var(--coyote); 
+            color: var(--khaki); flex: 1; padding: 14px 5px; font-size: 9px; 
+            font-weight: 700; cursor: pointer; text-align: center;
         }
 
         .targets-panel {
-            position: absolute; right: 10px; top: 10px; bottom: 180px;
+            position: absolute; right: 10px; top: 60px; bottom: 180px;
             width: 320px; background: rgba(26, 28, 18, 0.98); border: 2px solid var(--coyote); z-index: 1000;
             display: none; flex-direction: column;
         }
-        .targets-header { padding: 12px; background: var(--multicam-dark); font-weight: bold; font-size: 13px; color: var(--khaki); }
+        .targets-header { padding: 12px; background: var(--multicam-dark); font-weight: bold; font-size: 12px; }
         .targets-content { flex: 1; overflow-y: auto; padding: 10px; }
         .target-item { background: rgba(195, 176, 145, 0.05); border: 1px solid var(--multicam-dark); padding: 12px; margin-bottom: 8px; border-left: 4px solid var(--hazard); cursor: pointer; }
+        .target-dist { float: right; color: var(--hazard); font-weight: bold; }
 
-        .mil-marker { filter: drop-shadow(0 0 5px rgba(0,0,0,0.5)); animation: pulse-marker 2s infinite; }
-        @keyframes pulse-marker { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
-
-        @media (max-width: 768px) {
-            .targets-panel { width: calc(100% - 20px); left: 10px; top: 130px; }
-            .donate-btn { top: auto; bottom: 85px; left: 10px; right: 10px; justify-content: center; }
+        @media (max-width: 600px) {
+            .targets-panel { width: calc(100% - 20px); left: 10px; bottom: 80px; }
+            .layer-switch { right: 10px; top: 55px; }
         }
     </style>
 </head>
@@ -122,47 +136,51 @@
 
     <div id="loader">
         <div class="terminal-box">
-            <div class="terminal-header">> СИСТЕМА МОНІТОРИНГУ-•МОНІТОР|•ХАРКІВ•|•1654• V14.88</div>
-            <div class="terminal-logs" id="logs">
-                <div class="log-line">> ///ІНІЦІАЛІЗАЦІЯ/// ПРОТОКОЛІВ///...</div>
-                <div class="log-line">> ///ПІДКЛЮЧЕННЯ// ДО// ШЛЮЗУ//... <span class="log-success">ГОТОВО</span></div>
-                <div class="log-line">> ///ДЕШИФРУВАННя///ПОТОКУ... <span class="log-success">УСПІШНО</span></div>
-                <div class="log-line">> ///ЗАВАНТАЖЕННЯ// ГЕО-ДАНИХ///... <span class="log-success">100%</span></div>
-                <div class="log-line">> ///ПЕРЕВІРКА/// ПІДТРИМКИ// ПРОЄКТУ//... <span class="log-warn">ОЧІКУВАННЯ</span></div>
-                <div class="log-line log-success">> СИСТЕМА ГОТОВА ДО МОНІТОРИНГУ.</div>
+            <div class="terminal-header"><span>> MONITOR 1654_V.1.4.8.8.</span> <span id="load-pc">0%</span></div>
+            <div class="terminal-logs">
+                <div class="log-line">> ІНІЦІАЛІЗАЦІЯ ЯДРА... <span class="log-success">OK</span></div>
+                <div class="log-line">> ПІДКЛЮЧЕННЯ ДО ШЛЮЗУ... <span class="log-success">З'ЄДНАНО</span></div>
+                <div class="log-line">> СИНХРОНІЗАЦІЯ ТРЕКІВ... <span class="log-success">100%</span></div>
+                <div class="log-line">> ПЕРЕВІРКА GPS СТАТУСУ... <span class="log-success">АКТИВНО</span></div>
+                <div class="log-line log-success">> СИСТЕМА МОНІТОРИНГУ ГОТОВА.</div>
             </div>
             <div class="scan-bar"></div>
         </div>
     </div>
 
-    <a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="donate-btn">
-        <span class="donate-pulse"></span>
-        ПІДТРИМАТИ ПРОЄКТ
-    </a>
+    <div class="layer-switch">
+        <button class="layer-btn active" onclick="setLayer('tactical')">ТАКТИЧНА</button>
+        <button class="layer-btn" onclick="setLayer('sat')">СУПУТНИК</button>
+        <button class="layer-btn" onclick="setLayer('street')">ТОПОГРАФІЧНА</button>
+    </div>
 
-    <div id="map"></div>
-    <div class="grid-overlay" id="grid"></div>
+    <a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="donate-btn">ПІДТРИМАТИ ПРОЕКТ</a>
+
+    <div id="map" class="map-tactical"></div>
+    <div class="grid-overlay"></div>
     
     <div class="hud-overlay">
         <div class="hud-card">
-            <div class="hud-title">
-                <span>•МОНІТОР|•ХАРКІВ•|•1654•</span>
-                <span id="sys-time">00:00:00</span>
-            </div>
-            <div class="status-line"><span>ЗВ'ЯЗОК:</span><span id="connectionStatus" style="color:var(--hazard)">ОБРОБКА...</span></div>
+            <div class="hud-title"><span>• МОНІТОР | ХАРКІВ •</span> <span id="sys-time">00:00:00</span></div>
+            <div class="status-line"><span>ЗВ'ЯЗОК:</span><span id="connectionStatus">ОБРОБКА...</span></div>
             <div class="status-line"><span>ОБ'ЄКТІВ:</span><span id="targetCount">0</span></div>
+        </div>
+
+        <div id="dangerZone" class="hud-card danger-card" style="display: none;">
+            <div class="hud-title" style="border-color: var(--danger);"><span>НАЙБЛИЖЧА ЗАГРОЗА</span></div>
+            <div class="status-line"><span id="nearTargetName">---</span><span id="nearTargetDist" style="font-weight: bold;">0 КМ</span></div>
         </div>
     </div>
 
     <div class="targets-panel" id="tPanel">
-        <div class="targets-header">АКТИВНІ ТРЕКИ</div>
+        <div class="targets-header">АКТИВНІ ЦІЛІ</div>
         <div class="targets-content" id="targetsList"></div>
     </div>
 
     <div class="control-panel">
-        <button class="control-btn" onclick="toggleTargets()">СПИСКИ ЦІЛЕЙ</button>
-        <button class="control-btn" onclick="centerMap()">ЦЕНТРУВАННЯ</button>
-        <button class="control-btn" onclick="map.locate({setView: true, maxZoom: 10})">МОЄ МІСЦЕЗНАХОДЖЕНЯ</button>
+        <button class="control-btn" onclick="toggleTargets()">СПИСОК ЦІЛЕЙ</button>
+        <button class="control-btn" onclick="centerMap()">ЦЕНТРУВАНЯ</button>
+        <button class="control-btn" onclick="map.locate({setView: true, maxZoom: 12})">МОЄМОЄ МІСЦЕЗНАХОДЖЕННЯ</button>
         <button class="control-btn" onclick="location.reload()">ОНОВИТИ МАПУ</button>
     </div>
 
@@ -170,44 +188,66 @@
     <script>
         const DATA_URL = 'targets.json';
         const ICONS_PATH = 'img/';
-        let map, targets = new Map();
-        
-        const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
-        const lightLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
+        let map, targets = new Map(), userPos = null;
 
-        function startLoadingSequence() {
+        // ШАРИ МАПИ
+        const layers = {
+            tactical: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'),
+            sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
+            street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+        };
+
+        function setLayer(key) {
+            Object.values(layers).forEach(layer => map.removeLayer(layer));
+            layers[key].addTo(map);
+            
+            // Стилізація
+            document.querySelectorAll('.layer-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            const mapEl = document.getElementById('map');
+            if (key === 'tactical') {
+                mapEl.className = 'map-tactical';
+            } else {
+                mapEl.className = 'map-normal';
+            }
+        }
+
+        function startLoading() {
             const lines = document.querySelectorAll('.log-line');
-            lines.forEach((line, index) => setTimeout(() => line.style.display = 'block', index * 450));
-            setTimeout(() => document.getElementById('loader').classList.add('loader-hidden'), lines.length * 450 + 1000);
+            const percentEl = document.getElementById('load-pc');
+            lines.forEach((line, index) => {
+                setTimeout(() => {
+                    line.style.display = 'block';
+                    percentEl.innerText = `${Math.round(((index+1)/lines.length)*100)}%`;
+                    if(index === lines.length - 1) {
+                        setTimeout(() => document.getElementById('loader').classList.add('loader-hidden'), 800);
+                    }
+                }, index * 400);
+            });
         }
 
         function initMap() {
-            map = L.map('map', { zoomControl: false, attributionControl: false, layers: [darkLayer] }).setView([49.99, 36.23], 8);
-            L.control.layers({"ТАКТИЧНА": darkLayer, "СВІТЛА": lightLayer}, null, { collapsed: false, position: 'topright' }).addTo(map);
-            updateMapStyle(darkLayer);
-            map.on('baselayerchange', (e) => updateMapStyle(e.layer));
-        }
-
-        function updateMapStyle(layer) {
-            const mapEl = document.getElementById('map'), grid = document.getElementById('grid');
-            mapEl.className = layer === darkLayer ? 'map-dark' : 'map-light';
-            grid.style.display = layer === darkLayer ? 'block' : 'none';
+            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 8);
+            layers.tactical.addTo(map);
+            
+            map.on('locationfound', (e) => {
+                userPos = e.latlng;
+                updateDistances();
+            });
+            map.locate({setView: false, watch: true});
         }
 
         async function syncData() {
             try {
                 const res = await fetch(`${DATA_URL}?v=${Date.now()}`);
-                if (!res.ok) throw new Error();
                 const data = await res.json();
                 processTargets(data);
-                updateStatus(true);
-            } catch (e) { updateStatus(false); }
-        }
-
-        function updateStatus(isOnline) {
-            const el = document.getElementById('connectionStatus');
-            el.textContent = isOnline ? 'ОНЛАЙН' : 'ПОМИЛКА';
-            el.style.color = isOnline ? 'var(--multicam-olive)' : 'var(--hazard)';
+                document.getElementById('connectionStatus').innerText = 'ОНЛАЙН';
+                document.getElementById('connectionStatus').style.color = 'var(--multicam-olive)';
+            } catch (e) {
+                document.getElementById('connectionStatus').innerText = 'ПОМИЛКА';
+            }
         }
 
         function processTargets(data) {
@@ -215,41 +255,53 @@
             data.forEach(obj => {
                 const id = String(obj.id);
                 activeIds.add(id);
-                targets.has(id) ? updateTarget(targets.get(id), obj) : createTarget(obj);
+                if (targets.has(id)) {
+                    targets.get(id).marker.setLatLng([obj.lat, obj.lng]);
+                    targets.get(id).data = obj;
+                } else {
+                    const icon = L.icon({ iconUrl: `${ICONS_PATH}${obj.type}.png`, iconSize: [32, 32], iconAnchor: [16,16] });
+                    const marker = L.marker([obj.lat, obj.lng], { icon }).addTo(map);
+                    marker.bindPopup(`<b>${obj.label}</b>`);
+                    targets.set(id, { marker, data: obj, distance: Infinity });
+                }
             });
-            targets.forEach((val, id) => { if (!activeIds.has(id)) { map.removeLayer(val.marker); targets.delete(id); } });
+            targets.forEach((val, id) => { 
+                if (!activeIds.has(id)) { map.removeLayer(val.marker); targets.delete(id); } 
+            });
             document.getElementById('targetCount').innerText = targets.size;
+            updateDistances();
+        }
+
+        function updateDistances() {
+            if (!userPos || targets.size === 0) return;
+            let closest = { dist: Infinity, name: '---' };
+            
+            targets.forEach(t => {
+                const d = map.distance(userPos, t.marker.getLatLng()) / 1000;
+                t.distance = d;
+                if (d < closest.dist) closest = { dist: d, name: t.data.label.split('|')[0] };
+            });
+
+            const dz = document.getElementById('dangerZone');
+            dz.style.display = 'block';
+            if (closest.dist < 15) dz.classList.add('critical-alert');
+            else dz.classList.remove('critical-alert');
+
+            document.getElementById('nearTargetName').innerText = closest.name;
+            document.getElementById('nearTargetDist').innerText = closest.dist.toFixed(1) + ' КМ';
             updatePanel();
-        }
-
-        function createTarget(data) {
-            const icon = L.icon({ iconUrl: `${ICONS_PATH}${data.type}.png`, iconSize: [32, 32], iconAnchor: [16, 16], className: 'mil-marker' });
-            const marker = L.marker([data.lat, data.lng], { icon }).addTo(map);
-            marker.bindPopup(`<b style="color:#000">${data.label}</b>`);
-            targets.set(String(data.id), { marker, data });
-        }
-
-        function updateTarget(targetObj, newData) {
-            targetObj.marker.setLatLng([newData.lat, newData.lng]);
-            targetObj.data = newData;
         }
 
         function updatePanel() {
             const container = document.getElementById('targetsList');
-            let html = '';
-            targets.forEach(t => {
-                const name = t.data.label.split('|')[0];
-                html += `<div class="target-item" onclick="focusTarget('${t.data.id}')">
-                    <div style="font-size:11px; font-weight:bold; color:var(--khaki);">${name}</div>
-                    <div style="font-size:9px; color:var(--coyote); margin-top:3px;">ТИП: ${t.data.type}</div>
-                </div>`;
-            });
-            container.innerHTML = html || '<div style="text-align:center; opacity:0.3; padding-top:20px;">НЕБО ЧИСТЕ</div>';
-        }
-
-        function focusTarget(id) {
-            const t = targets.get(String(id));
-            if (t) { map.flyTo(t.marker.getLatLng(), 11); t.marker.openPopup(); if (window.innerWidth < 768) toggleTargets(); }
+            const sorted = Array.from(targets.values()).sort((a,b) => a.distance - b.distance);
+            container.innerHTML = sorted.map(t => `
+                <div class="target-item" onclick="map.flyTo([${t.data.lat}, ${t.data.lng}], 11); if(window.innerWidth < 600) toggleTargets();">
+                    <span class="target-dist">${t.distance !== Infinity ? t.distance.toFixed(1) + ' км' : '--'}</span>
+                    <div style="font-size:11px; font-weight:bold;">${t.data.label.split('|')[0]}</div>
+                    <div style="font-size:9px; opacity:0.6;">${t.data.time} | ${t.data.type}</div>
+                </div>
+            `).join('');
         }
 
         function toggleTargets() {
@@ -264,9 +316,16 @@
             }
         }
 
-        setInterval(() => document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA'), 1000);
+        setInterval(() => {
+            document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA');
+        }, 1000);
 
-        window.onload = () => { initMap(); syncData(); startLoadingSequence(); setInterval(syncData, 4000); };
+        window.onload = () => {
+            initMap();
+            syncData();
+            startLoading();
+            setInterval(syncData, 5000);
+        };
     </script>
 </body>
 </html>
