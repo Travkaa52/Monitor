@@ -30,217 +30,206 @@
             text-transform: uppercase;
         }
 
-        body::before {
-            content: ""; position: fixed; inset: 0;
-            background-image: radial-gradient(var(--multicam-dark) 1px, transparent 1px);
-            background-size: 25px 25px; opacity: 0.2; pointer-events: none; z-index: 2;
+        /* ЕКРАН ЗАВАНТАЖЕННЯ */
+        #loader {
+            position: fixed; inset: 0; background: #000; z-index: 10000;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transition: opacity 0.8s ease, visibility 0.8s;
         }
 
-        #map {
-            position: absolute; inset: 0;
-            z-index: 1;
-            background: #0f1108;
-            filter: sepia(0.4) contrast(1.1) brightness(0.8);
+        .terminal-box {
+            width: 90%; max-width: 500px; height: 340px;
+            border: 1px solid var(--multicam-dark); background: rgba(10, 10, 5, 0.9);
+            padding: 20px; position: relative; overflow: hidden;
         }
 
-        .hud-overlay {
-            position: absolute;
-            top: env(safe-area-inset-top, 10px);
-            left: 10px;
-            z-index: 1000;
-            pointer-events: none;
+        .terminal-header { color: var(--hazard); font-size: 14px; margin-bottom: 15px; border-bottom: 1px solid var(--multicam-dark); padding-bottom: 5px; }
+        .terminal-logs { font-size: 11px; line-height: 1.8; color: var(--khaki); }
+        .log-line { margin-bottom: 4px; display: none; }
+        .log-success { color: var(--multicam-olive); font-weight: bold; }
+        .log-warn { color: var(--hazard); }
+
+        .scan-bar {
+            position: absolute; bottom: 0; left: 0; height: 2px; width: 100%;
+            background: var(--hazard); box-shadow: 0 0 15px var(--hazard);
+            animation: scan-move 2s infinite ease-in-out;
         }
 
+        @keyframes scan-move { 0% { bottom: 0; } 50% { bottom: 100%; } 100% { bottom: 0; } }
+        .loader-hidden { opacity: 0; visibility: hidden; }
+
+        /* ІНТЕРФЕЙС МАПИ */
+        .grid-overlay { position: fixed; inset: 0; background-image: radial-gradient(var(--multicam-dark) 1px, transparent 1px); background-size: 25px 25px; opacity: 0.2; pointer-events: none; z-index: 2; }
+        #map { position: absolute; inset: 0; z-index: 1; background: #0f1108; transition: filter 0.5s ease; }
+        .map-dark { filter: sepia(0.4) contrast(1.1) brightness(0.8); }
+        .map-light { filter: none; }
+
+        /* HUD ЕЛЕМЕНТИ */
+        .hud-overlay { position: absolute; top: 10px; left: 10px; z-index: 1000; pointer-events: none; }
         .hud-card {
-            background: rgba(26, 28, 18, 0.95);
-            border: 2px solid var(--coyote);
-            padding: 10px;
-            margin-bottom: 8px;
-            backdrop-filter: blur(5px);
-            min-width: 240px;
-            pointer-events: auto;
+            background: rgba(26, 28, 18, 0.95); border: 2px solid var(--coyote); padding: 10px; margin-bottom: 8px;
+            backdrop-filter: blur(5px); min-width: 260px; pointer-events: auto;
             clip-path: polygon(0 0, 95% 0, 100% 20%, 100% 100%, 5% 100%, 0 80%);
         }
-
-        .hud-title { 
-            font-size: 12px; font-weight: 700; color: var(--khaki);
-            border-bottom: 1px solid var(--multicam-dark); 
-            margin-bottom: 6px; padding-bottom: 4px;
-            display: flex; justify-content: space-between;
-        }
-
+        .hud-title { font-size: 10px; font-weight: 700; border-bottom: 1px solid var(--multicam-dark); margin-bottom: 6px; padding-bottom: 4px; display: flex; justify-content: space-between; }
         .status-line { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 3px; }
-        
-        #connectionStatus { color: #880000; font-weight: bold; }
-        #connectionStatus.online { color: var(--multicam-olive); }
 
+        /* КНОПКА ДОНАТУ */
+        .donate-btn {
+            position: absolute; top: 130px; right: 10px; z-index: 1000;
+            background: var(--hazard); color: #000; border: 1px solid #000;
+            padding: 12px 18px; font-family: var(--font); font-size: 11px; font-weight: 800;
+            text-decoration: none; cursor: pointer;
+            clip-path: polygon(10% 0, 100% 0, 100% 75%, 90% 100%, 0 100%, 0 25%);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); transition: 0.3s;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .donate-btn:hover { background: var(--khaki); transform: translateY(-2px); box-shadow: 0 0 20px var(--hazard); }
+        .donate-pulse { width: 8px; height: 8px; background: #000; border-radius: 50%; animation: pulse-ring 1.5s infinite; }
+        @keyframes pulse-ring { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
+
+        /* ПАНЕЛЬ КЕРУВАННЯ */
         .control-panel {
             position: absolute; bottom: 0; left: 0; right: 0;
             background: #1a1c12; border-top: 3px solid var(--multicam-dark);
             padding: 12px 10px env(safe-area-inset-bottom);
             z-index: 1000; display: flex; gap: 6px;
         }
-
         .control-btn {
-            background: var(--multicam-dark);
-            border: 1px solid var(--coyote);
-            color: var(--khaki);
-            flex: 1; padding: 14px 5px;
-            font-size: 11px; font-weight: 700; font-family: var(--font);
-            cursor: pointer; transition: 0.2s;
+            background: var(--multicam-dark); border: 1px solid var(--coyote);
+            color: var(--khaki); flex: 1; padding: 14px 5px; font-size: 9px; font-weight: 700; cursor: pointer;
         }
-
-        .control-btn:active { background: var(--khaki); color: #1a1c12; }
 
         .targets-panel {
-            position: absolute; right: 10px; top: 10px; bottom: 100px;
-            width: 320px; background: rgba(26, 28, 18, 0.98);
-            border: 2px solid var(--coyote); z-index: 1000;
+            position: absolute; right: 10px; top: 10px; bottom: 180px;
+            width: 320px; background: rgba(26, 28, 18, 0.98); border: 2px solid var(--coyote); z-index: 1000;
             display: none; flex-direction: column;
         }
-
-        .targets-header { 
-            padding: 12px; background: var(--multicam-dark); 
-            color: var(--khaki); font-weight: bold; font-size: 13px;
-        }
-
+        .targets-header { padding: 12px; background: var(--multicam-dark); font-weight: bold; font-size: 13px; color: var(--khaki); }
         .targets-content { flex: 1; overflow-y: auto; padding: 10px; }
+        .target-item { background: rgba(195, 176, 145, 0.05); border: 1px solid var(--multicam-dark); padding: 12px; margin-bottom: 8px; border-left: 4px solid var(--hazard); cursor: pointer; }
 
-        .target-item {
-            background: rgba(195, 176, 145, 0.05);
-            border: 1px solid var(--multicam-dark);
-            padding: 12px; margin-bottom: 8px; border-left: 4px solid var(--hazard);
-            cursor: pointer;
-        }
-
-        .mil-marker {
-            filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));
-        }
+        .mil-marker { filter: drop-shadow(0 0 5px rgba(0,0,0,0.5)); animation: pulse-marker 2s infinite; }
+        @keyframes pulse-marker { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
 
         @media (max-width: 768px) {
             .targets-panel { width: calc(100% - 20px); left: 10px; top: 130px; }
-            .hud-card { width: calc(100vw - 20px); }
+            .donate-btn { top: auto; bottom: 85px; left: 10px; right: 10px; justify-content: center; }
         }
     </style>
 </head>
 <body>
 
+    <div id="loader">
+        <div class="terminal-box">
+            <div class="terminal-header">> СИСТЕМА МОНІТОРИНГУ-•МОНІТОР|•ХАРКІВ•|•1654• V14.88</div>
+            <div class="terminal-logs" id="logs">
+                <div class="log-line">> ///ІНІЦІАЛІЗАЦІЯ/// ПРОТОКОЛІВ///...</div>
+                <div class="log-line">> ///ПІДКЛЮЧЕННЯ// ДО// ШЛЮЗУ//... <span class="log-success">ГОТОВО</span></div>
+                <div class="log-line">> ///ДЕШИФРУВАННя///ПОТОКУ... <span class="log-success">УСПІШНО</span></div>
+                <div class="log-line">> ///ЗАВАНТАЖЕННЯ// ГЕО-ДАНИХ///... <span class="log-success">100%</span></div>
+                <div class="log-line">> ///ПЕРЕВІРКА/// ПІДТРИМКИ// ПРОЄКТУ//... <span class="log-warn">ОЧІКУВАННЯ</span></div>
+                <div class="log-line log-success">> СИСТЕМА ГОТОВА ДО МОНІТОРИНГУ.</div>
+            </div>
+            <div class="scan-bar"></div>
+        </div>
+    </div>
+
+    <a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" class="donate-btn">
+        <span class="donate-pulse"></span>
+        ПІДТРИМАТИ ПРОЄКТ
+    </a>
+
     <div id="map"></div>
+    <div class="grid-overlay" id="grid"></div>
     
     <div class="hud-overlay">
         <div class="hud-card">
             <div class="hud-title">
-                <span>NEPTUN_TACTICAL_V3</span>
-                <span>UNIT: 1654</span>
+                <span>•МОНІТОР|•ХАРКІВ•|•1654•</span>
+                <span id="sys-time">00:00:00</span>
             </div>
-            <div class="status-line">
-                <span>ЗВ'ЯЗОК:</span>
-                <span id="connectionStatus">НЕМАЄ_СИГНАЛУ</span>
-            </div>
-            <div class="status-line">
-                <span>ОБ'ЄКТІВ У ПОВІТРІ:</span>
-                <span id="targetCount">0</span>
-            </div>
+            <div class="status-line"><span>ЗВ'ЯЗОК:</span><span id="connectionStatus" style="color:var(--hazard)">ОБРОБКА...</span></div>
+            <div class="status-line"><span>ОБ'ЄКТІВ:</span><span id="targetCount">0</span></div>
         </div>
     </div>
 
     <div class="targets-panel" id="tPanel">
-        <div class="targets-header">СПИСОК АКТИВНИХ ТРЕКІВ</div>
+        <div class="targets-header">АКТИВНІ ТРЕКИ</div>
         <div class="targets-content" id="targetsList"></div>
     </div>
 
     <div class="control-panel">
-        <button class="control-btn" onclick="toggleTargets()">ЦІЛІ</button>
-        <button class="control-btn" onclick="centerMap()">ЦЕНТР</button>
-        <button class="control-btn" onclick="map.locate({setView: true, maxZoom: 10})">GPS</button>
-        <button class="control-btn" onclick="location.reload()">ОНОВИТИ</button>
+        <button class="control-btn" onclick="toggleTargets()">СПИСКИ ЦІЛЕЙ</button>
+        <button class="control-btn" onclick="centerMap()">ЦЕНТРУВАННЯ</button>
+        <button class="control-btn" onclick="map.locate({setView: true, maxZoom: 10})">МОЄ МІСЦЕЗНАХОДЖЕНЯ</button>
+        <button class="control-btn" onclick="location.reload()">ОНОВИТИ МАПУ</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         const DATA_URL = 'targets.json';
         const ICONS_PATH = 'img/';
+        let map, targets = new Map();
         
-        let map;
-        let targets = new Map();
-        
-        function initMap() {
-            // Центруємо карту на Україні
-            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([48.5, 35.0], 7);
-            
-            // Використовуємо Dark Tiles
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                maxZoom: 19
-            }).addTo(map);
+        const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
+        const lightLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
 
-            // Виправляємо розміри карти при зміні вікна
-            setTimeout(() => map.invalidateSize(), 400);
+        function startLoadingSequence() {
+            const lines = document.querySelectorAll('.log-line');
+            lines.forEach((line, index) => setTimeout(() => line.style.display = 'block', index * 450));
+            setTimeout(() => document.getElementById('loader').classList.add('loader-hidden'), lines.length * 450 + 1000);
+        }
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false, attributionControl: false, layers: [darkLayer] }).setView([49.99, 36.23], 8);
+            L.control.layers({"ТАКТИЧНА": darkLayer, "СВІТЛА": lightLayer}, null, { collapsed: false, position: 'topright' }).addTo(map);
+            updateMapStyle(darkLayer);
+            map.on('baselayerchange', (e) => updateMapStyle(e.layer));
+        }
+
+        function updateMapStyle(layer) {
+            const mapEl = document.getElementById('map'), grid = document.getElementById('grid');
+            mapEl.className = layer === darkLayer ? 'map-dark' : 'map-light';
+            grid.style.display = layer === darkLayer ? 'block' : 'none';
         }
 
         async function syncData() {
             try {
-                // Додаємо Timestamp щоб уникнути кешування браузером
                 const res = await fetch(`${DATA_URL}?v=${Date.now()}`);
-                if (!res.ok) throw new Error('Network error');
+                if (!res.ok) throw new Error();
                 const data = await res.json();
                 processTargets(data);
                 updateStatus(true);
-            } catch (e) {
-                console.error('Sync failed:', e);
-                updateStatus(false);
-            }
+            } catch (e) { updateStatus(false); }
         }
 
         function updateStatus(isOnline) {
             const el = document.getElementById('connectionStatus');
-            el.textContent = isOnline ? 'ОНЛАЙН' : 'ПОМИЛКА_ЗВ’ЯЗКУ';
-            el.className = isOnline ? 'online' : '';
+            el.textContent = isOnline ? 'ОНЛАЙН' : 'ПОМИЛКА';
+            el.style.color = isOnline ? 'var(--multicam-olive)' : 'var(--hazard)';
         }
 
         function processTargets(data) {
             const activeIds = new Set();
-            
             data.forEach(obj => {
                 const id = String(obj.id);
                 activeIds.add(id);
-
-                if (targets.has(id)) {
-                    updateTarget(targets.get(id), obj);
-                } else {
-                    createTarget(obj);
-                }
+                targets.has(id) ? updateTarget(targets.get(id), obj) : createTarget(obj);
             });
-
-            // Видаляємо цілі, яких більше немає в JSON
-            targets.forEach((val, id) => {
-                if (!activeIds.has(id)) {
-                    map.removeLayer(val.marker);
-                    targets.delete(id);
-                }
-            });
-
+            targets.forEach((val, id) => { if (!activeIds.has(id)) { map.removeLayer(val.marker); targets.delete(id); } });
             document.getElementById('targetCount').innerText = targets.size;
             updatePanel();
         }
 
         function createTarget(data) {
-            const icon = L.icon({
-                iconUrl: `${ICONS_PATH}${data.type}.png`,
-                iconSize: [32, 32],
-                iconAnchor: [16, 16],
-                className: 'mil-marker'
-            });
-
+            const icon = L.icon({ iconUrl: `${ICONS_PATH}${data.type}.png`, iconSize: [32, 32], iconAnchor: [16, 16], className: 'mil-marker' });
             const marker = L.marker([data.lat, data.lng], { icon }).addTo(map);
-            
-            // Додаємо Popup з деталями
-            marker.bindPopup(`<b style="color:#000">${data.label}</b><br>Час: ${data.time}`);
-            
+            marker.bindPopup(`<b style="color:#000">${data.label}</b>`);
             targets.set(String(data.id), { marker, data });
         }
 
         function updateTarget(targetObj, newData) {
-            // Плавне переміщення
             targetObj.marker.setLatLng([newData.lat, newData.lng]);
             targetObj.data = newData;
         }
@@ -248,31 +237,19 @@
         function updatePanel() {
             const container = document.getElementById('targetsList');
             let html = '';
-            
             targets.forEach(t => {
-                // Беремо першу частину мітки до роздільника
-                const name = t.data.label.includes('|') ? t.data.label.split('|')[0] : t.data.label;
-                
-                html += `
-                    <div class="target-item" onclick="focusTarget('${t.data.id}')">
-                        <div style="font-size:12px; font-weight:bold; color:var(--khaki);">${name}</div>
-                        <div style="font-size:9px; color:var(--coyote); margin-top:5px;">
-                            ТИП: ${t.data.type.toUpperCase()} | ЧАС: ${t.data.time} | К-СТЬ: ${t.data.count || 1}
-                        </div>
-                    </div>
-                `;
+                const name = t.data.label.split('|')[0];
+                html += `<div class="target-item" onclick="focusTarget('${t.data.id}')">
+                    <div style="font-size:11px; font-weight:bold; color:var(--khaki);">${name}</div>
+                    <div style="font-size:9px; color:var(--coyote); margin-top:3px;">ТИП: ${t.data.type}</div>
+                </div>`;
             });
-            
-            container.innerHTML = html || '<div style="text-align:center; opacity:0.3; padding-top:20px;">НЕМАЄ ДАНИХ</div>';
+            container.innerHTML = html || '<div style="text-align:center; opacity:0.3; padding-top:20px;">НЕБО ЧИСТЕ</div>';
         }
 
         function focusTarget(id) {
             const t = targets.get(String(id));
-            if (t) {
-                map.flyTo(t.marker.getLatLng(), 11);
-                t.marker.openPopup();
-                if (window.innerWidth < 768) toggleTargets();
-            }
+            if (t) { map.flyTo(t.marker.getLatLng(), 11); t.marker.openPopup(); if (window.innerWidth < 768) toggleTargets(); }
         }
 
         function toggleTargets() {
@@ -282,18 +259,14 @@
 
         function centerMap() {
             if (targets.size > 0) {
-                const markerArray = Array.from(targets.values()).map(t => t.marker);
-                const group = new L.featureGroup(markerArray);
+                const group = new L.featureGroup(Array.from(targets.values()).map(t => t.marker));
                 map.fitBounds(group.getBounds().pad(0.3));
             }
         }
 
-        window.onload = () => {
-            initMap();
-            syncData();
-            // Оновлення кожні 5 секунд
-            setInterval(syncData, 5000);
-        };
+        setInterval(() => document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA'), 1000);
+
+        window.onload = () => { initMap(); syncData(); startLoadingSequence(); setInterval(syncData, 4000); };
     </script>
 </body>
 </html>
