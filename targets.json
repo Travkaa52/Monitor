@@ -3,13 +3,13 @@
     "id": 176,
     "type": "aircraft",
     "count": 1,
-    "status": "active",
-    "reason": "",
+    "status": "archived",
+    "reason": "Впало",
     "lat": 50.27361,
     "lng": 36.392,
     "label": "✈️ Авіація | БНР",
     "time": "10:06",
-    "expire_at": "2026-01-24T11:06:41.254420"
+    "expire_at": "2026-01-24T10:26:17.084765"
   },
   {
     "id": 180,
