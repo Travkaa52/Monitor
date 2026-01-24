@@ -10,7 +10,6 @@
     
     <style>
         :root {
-            /* MILITARY PALETTE */
             --coyote: #a58d5f;
             --khaki: #c3b091;
             --multicam-dark: #4b5320;
@@ -31,7 +30,6 @@
             text-transform: uppercase;
         }
 
-        /* ТАКТИЧНА СІТКА НА ФОНІ */
         body::before {
             content: ""; position: fixed; inset: 0;
             background-image: radial-gradient(var(--multicam-dark) 1px, transparent 1px);
@@ -45,7 +43,6 @@
             filter: sepia(0.4) contrast(1.1) brightness(0.8);
         }
 
-        /* HUD ПАНЕЛЬ */
         .hud-overlay {
             position: absolute;
             top: env(safe-area-inset-top, 10px);
@@ -77,7 +74,6 @@
         #connectionStatus { color: #880000; font-weight: bold; }
         #connectionStatus.online { color: var(--multicam-olive); }
 
-        /* НИЖНЯ ПАНЕЛЬ КЕРУВАННЯ */
         .control-panel {
             position: absolute; bottom: 0; left: 0; right: 0;
             background: #1a1c12; border-top: 3px solid var(--multicam-dark);
@@ -96,7 +92,6 @@
 
         .control-btn:active { background: var(--khaki); color: #1a1c12; }
 
-        /* СПИСОК ЦІЛЕЙ */
         .targets-panel {
             position: absolute; right: 10px; top: 10px; bottom: 100px;
             width: 320px; background: rgba(26, 28, 18, 0.98);
@@ -115,11 +110,11 @@
             background: rgba(195, 176, 145, 0.05);
             border: 1px solid var(--multicam-dark);
             padding: 12px; margin-bottom: 8px; border-left: 4px solid var(--hazard);
+            cursor: pointer;
         }
 
-        /* МАРКЕРИ */
         .mil-marker {
-            filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));
+            filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));
         }
 
         @media (max-width: 768px) {
@@ -157,7 +152,7 @@
     <div class="control-panel">
         <button class="control-btn" onclick="toggleTargets()">ЦІЛІ</button>
         <button class="control-btn" onclick="centerMap()">ЦЕНТР</button>
-        <button class="control-btn" onclick="map.locate({setView: true, maxZoom: 10})">МОЯ_ПОЗИЦІЯ</button>
+        <button class="control-btn" onclick="map.locate({setView: true, maxZoom: 10})">GPS</button>
         <button class="control-btn" onclick="location.reload()">ОНОВИТИ</button>
     </div>
 
@@ -170,18 +165,28 @@
         let targets = new Map();
         
         function initMap() {
+            // Центруємо карту на Україні
             map = L.map('map', { zoomControl: false, attributionControl: false }).setView([48.5, 35.0], 7);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+            
+            // Використовуємо Dark Tiles
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19
+            }).addTo(map);
+
+            // Виправляємо розміри карти при зміні вікна
+            setTimeout(() => map.invalidateSize(), 400);
         }
 
         async function syncData() {
             try {
-                const res = await fetch(DATA_URL + '?v=' + Date.now());
-                if (!res.ok) throw new Error();
+                // Додаємо Timestamp щоб уникнути кешування браузером
+                const res = await fetch(`${DATA_URL}?v=${Date.now()}`);
+                if (!res.ok) throw new Error('Network error');
                 const data = await res.json();
                 processTargets(data);
                 updateStatus(true);
             } catch (e) {
+                console.error('Sync failed:', e);
                 updateStatus(false);
             }
         }
@@ -194,9 +199,11 @@
 
         function processTargets(data) {
             const activeIds = new Set();
+            
             data.forEach(obj => {
                 const id = String(obj.id);
                 activeIds.add(id);
+
                 if (targets.has(id)) {
                     updateTarget(targets.get(id), obj);
                 } else {
@@ -204,6 +211,7 @@
                 }
             });
 
+            // Видаляємо цілі, яких більше немає в JSON
             targets.forEach((val, id) => {
                 if (!activeIds.has(id)) {
                     map.removeLayer(val.marker);
@@ -218,15 +226,21 @@
         function createTarget(data) {
             const icon = L.icon({
                 iconUrl: `${ICONS_PATH}${data.type}.png`,
-                iconSize: [30, 30],
-                iconAnchor: [15, 15],
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
                 className: 'mil-marker'
             });
+
             const marker = L.marker([data.lat, data.lng], { icon }).addTo(map);
+            
+            // Додаємо Popup з деталями
+            marker.bindPopup(`<b style="color:#000">${data.label}</b><br>Час: ${data.time}`);
+            
             targets.set(String(data.id), { marker, data });
         }
 
         function updateTarget(targetObj, newData) {
+            // Плавне переміщення
             targetObj.marker.setLatLng([newData.lat, newData.lng]);
             targetObj.data = newData;
         }
@@ -234,17 +248,31 @@
         function updatePanel() {
             const container = document.getElementById('targetsList');
             let html = '';
+            
             targets.forEach(t => {
+                // Беремо першу частину мітки до роздільника
+                const name = t.data.label.includes('|') ? t.data.label.split('|')[0] : t.data.label;
+                
                 html += `
-                    <div class="target-item" onclick="map.flyTo([${t.data.lat}, ${t.data.lng}], 10)">
-                        <div style="font-size:12px; font-weight:bold; color:var(--khaki);">${t.data.label.split('|')[0]}</div>
+                    <div class="target-item" onclick="focusTarget('${t.data.id}')">
+                        <div style="font-size:12px; font-weight:bold; color:var(--khaki);">${name}</div>
                         <div style="font-size:9px; color:var(--coyote); margin-top:5px;">
-                            ТИП: ${t.data.type.toUpperCase()} | ЧАС: ${t.data.time}
+                            ТИП: ${t.data.type.toUpperCase()} | ЧАС: ${t.data.time} | К-СТЬ: ${t.data.count || 1}
                         </div>
                     </div>
                 `;
             });
+            
             container.innerHTML = html || '<div style="text-align:center; opacity:0.3; padding-top:20px;">НЕМАЄ ДАНИХ</div>';
+        }
+
+        function focusTarget(id) {
+            const t = targets.get(String(id));
+            if (t) {
+                map.flyTo(t.marker.getLatLng(), 11);
+                t.marker.openPopup();
+                if (window.innerWidth < 768) toggleTargets();
+            }
         }
 
         function toggleTargets() {
@@ -254,15 +282,17 @@
 
         function centerMap() {
             if (targets.size > 0) {
-                const group = new L.featureGroup(Array.from(targets.values()).map(t => t.marker));
+                const markerArray = Array.from(targets.values()).map(t => t.marker);
+                const group = new L.featureGroup(markerArray);
                 map.fitBounds(group.getBounds().pad(0.3));
             }
         }
 
         window.onload = () => {
             initMap();
-            setInterval(syncData, 5000);
             syncData();
+            // Оновлення кожні 5 секунд
+            setInterval(syncData, 5000);
         };
     </script>
 </body>
