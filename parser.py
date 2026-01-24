@@ -30,7 +30,8 @@ SYMBOLS = {
     "aircraft": "✈️ Авіація", "unknown": "❓ Невідомо"
 }
 
-pending_data = {}
+# Черга для навчання: зберігає дані повідомлення, поки адмін не вибере тип
+pending_targets = {}
 delete_queue = {}
 
 # ================= СИСТЕМА ГІТ-ДЕПЛОЮ =================
@@ -74,7 +75,7 @@ def advanced_parse(text):
 # ================= ОСНОВНИЙ ОБРОБНИК =================
 @client.on(events.NewMessage)
 async def handle_messages(event):
-    # 1. АДМІН-КОМАНДИ
+    # 1. АДМІН-КОМАНДИ (Керування списком)
     if event.sender_id == ADMIN_ID:
         if event.raw_text in ['/1', '1']:
             targets = db('targets.json')
@@ -99,36 +100,34 @@ async def handle_messages(event):
         # Спеціальні типи (ППО/Авіація)
         if any(word in text for word in ["робота ппо", "працює ппо"]):
             final_type = "air_defense"
-            if any(bnr in text for bnr in ["бнр", "белгород", "бєлгород"]):
-                found_points = [geo_db.get("бнр", [50.59, 36.58, "БНР"])]
         
         if not final_type and "активність" in text and "авіації" in text:
             final_type = "aircraft"
-            if "бнр" in text: found_points = [geo_db.get("бнр", [50.59, 36.58, "БНР"])]
 
         # Пошук точок
-        if not found_points:
-            for k in sorted(geo_db.keys(), key=len, reverse=True):
-                if k in text: found_points.append(geo_db[k])
+        for k in sorted(geo_db.keys(), key=len, reverse=True):
+            if k in text: found_points.append(geo_db[k])
         
         if not found_points: return
 
-        # Визначення типу
+        # Визначення типу з бази
         if not final_type:
             for t_type, keywords in types_db.items():
                 if any(word in text for word in keywords):
                     final_type = t_type
                     break
         
-        # Навчання новому типу
+        # ЛОГІКА НАВЧАННЯ: Якщо тип невідомий - ставимо unknown і питаємо адміна
+        is_learning = False
         if not final_type:
+            final_type = "unknown"
+            is_learning = True
             threat_name = advanced_parse(raw_text)
-            pending_data[ADMIN_ID] = {"term": threat_name.lower(), "lat": found_points[-1][0], "lng": found_points[-1][1], "place": found_points[-1][2]}
-            btns = [[Button.inline("🛵 Дрон", "add:drone"), Button.inline("🚀 Ракета", "add:missile")],
-                    [Button.inline("☄️ КАБ", "add:kab"), Button.inline("💥 ППО", "add:air_defense")],
-                    [Button.inline("❌ Ігнор", "cancel")]]
-            await client.send_message(ADMIN_ID, f"❓ **Новий тип!**\nТекст: `{raw_text}`", buttons=btns)
-            return
+            pending_targets[event.id] = {"term": threat_name.lower()}
+            
+            btns = [[Button.inline("🛵 Дрон", f"learn:drone:{event.id}"), Button.inline("🚀 Ракета", f"learn:missile:{event.id}")],
+                    [Button.inline("☄️ КАБ", f"learn:kab:{event.id}"), Button.inline("💥 ППО", f"learn:air_defense:{event.id}")]]
+            await client.send_message(ADMIN_ID, f"❓ **Новий тип!**\nТекст: `{raw_text}`\nЯ вивів це як 'Невідомо'. Виберіть тип:", buttons=btns)
 
         # Збереження
         minutes = 20 if final_type == "air_defense" else (60 if final_type == "aircraft" else 45)
@@ -151,7 +150,29 @@ async def callback_handler(event):
     uid = event.sender_id
     targets = db('targets.json')
 
-    if data.startswith("edit_cnt:"):
+    # Навчання (learn:тип:id_повідомлення)
+    if data.startswith("learn:"):
+        _, cat, tid = data.split(":")
+        tid = int(tid)
+        info = pending_targets.pop(tid, None)
+        if info:
+            # Оновлюємо базу знань
+            t_db = db('types.json')
+            if cat not in t_db: t_db[cat] = []
+            if info['term'] not in t_db[cat]:
+                t_db[cat].append(info['term'])
+                db('types.json', t_db)
+            
+            # Оновлюємо вже існуючу мітку в targets.json
+            for t in targets:
+                if t['id'] == tid:
+                    t['type'] = cat
+                    t['label'] = t['label'].replace(SYMBOLS["unknown"], SYMBOLS[cat])
+                    break
+            db('targets.json', targets)
+            await event.edit(f"✅ Вивчено: `{info['term']}` -> {SYMBOLS[cat]}")
+
+    elif data.startswith("edit_cnt:"):
         _, act, tid = data.split(":")
         for t in targets:
             if t['id'] == int(tid):
@@ -178,23 +199,15 @@ async def callback_handler(event):
         db('targets.json', targets)
         await event.edit(f"📥 Архів: {reason}")
 
-    elif data.startswith("add:"):
-        cat = data.split(":")[1]
-        info = pending_data.pop(uid, None)
-        if info:
-            t_db = db('types.json')
-            if cat not in t_db: t_db[cat] = []
-            t_db[cat].append(info['term'])
-            db('types.json', t_db)
-            await event.edit(f"✅ Тип `{info['term']}` додано до {SYMBOLS[cat]}")
-
 # ================= ЗАПУСК =================
 def cleanup_worker():
     while True:
-        now = datetime.now()
-        t_list = db('targets.json')
-        filtered = [t for t in t_list if datetime.fromisoformat(t['expire_at']) > now]
-        if len(filtered) != len(t_list): db('targets.json', filtered)
+        try:
+            now = datetime.now()
+            t_list = db('targets.json')
+            filtered = [t for t in t_list if datetime.fromisoformat(t['expire_at']) > now]
+            if len(filtered) != len(t_list): db('targets.json', filtered)
+        except: pass
         threading.Event().wait(60)
 
 async def main():
