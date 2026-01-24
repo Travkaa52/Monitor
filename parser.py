@@ -19,7 +19,11 @@ API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "") 
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+
+# Отримуємо список ID через кому, наприклад: 1234567,8901234
+admin_raw = os.getenv("ADMIN_IDS", "0")
+ADMIN_IDS = [int(i.strip()) for i in admin_raw.split(",") if i.strip().isdigit()]
+
 CHANNEL_ID = 'monitorkh1654'
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -33,7 +37,7 @@ SYMBOLS = {
 
 ADMIN_HELP_TEXT = """
 🚀 **NEPTUN TACTICAL TERMINAL**
-Команди керування:
+Команди керування (доступно всім адмінам):
 
 🔢 `1` або `/list` — Керування активними цілями.
 📊 `/stats` — Статистика об'єктів та баз.
@@ -41,8 +45,6 @@ ADMIN_HELP_TEXT = """
 ➕ `/add [тип] [місто]` — Ручне додавання мітки.
 🧹 `/clear` — Очистити карту (скидання targets.json).
 ❓ `/help` — Виклик цього меню.
-
-*Типи для додавання:* `drone`, `missile`, `kab`, `air_defense`
 """
 
 pending_targets = {}
@@ -97,7 +99,7 @@ def advanced_parse(text):
     return re.sub(r'["\'«»]', '', clean.split('курсом')[0].split('на')[0].strip())
 
 # ================= АДМІН ПАНЕЛЬ =================
-@client.on(events.NewMessage(incoming=True, from_users=ADMIN_ID))
+@client.on(events.NewMessage(incoming=True, from_users=ADMIN_IDS))
 async def admin_panel(event):
     text = event.raw_text.lower()
     
@@ -172,7 +174,10 @@ async def handle_channel(event):
             pending_targets[event.id] = {"term": target_name.lower()}
             btns = [[Button.inline("🛵 Дрон", f"learn:drone:{event.id}"), Button.inline("🚀 Ракета", f"learn:missile:{event.id}")],
                     [Button.inline("☄️ КАБ", f"learn:kab:{event.id}"), Button.inline("💥 ППО", f"learn:air_defense:{event.id}")]]
-            await client.send_message(ADMIN_ID, f"❓ **Новий тип!**\n`{raw_text}`", buttons=btns)
+            # Надсилаємо сповіщення ВСІМ адмінам
+            for adm in ADMIN_IDS:
+                try: await client.send_message(adm, f"❓ **Новий тип!**\n`{raw_text}`", buttons=btns)
+                except: pass
 
         new_target = {
             "id": event.id, "type": final_type, "count": extract_count(raw_text),
@@ -186,6 +191,8 @@ async def handle_channel(event):
 # ================= CALLBACKS =================
 @client.on(events.CallbackQuery)
 async def callback_handler(event):
+    if event.sender_id not in ADMIN_IDS: return # Тільки для адмінів
+    
     data = event.data.decode(); uid = event.sender_id; targets = db('targets.json')
     if data.startswith("learn:"):
         _, cat, tid = data.split(":")
@@ -218,9 +225,11 @@ async def callback_handler(event):
 # ================= ЗАПУСК =================
 async def main():
     await client.start(bot_token=BOT_TOKEN)
-    logger.info("💎 NEPTUN ONLINE")
-    try: await client.send_message(ADMIN_ID, "✅ **СИСТЕМА ГОТОВА**\n" + ADMIN_HELP_TEXT)
-    except: pass
+    logger.info(f"💎 NEPTUN ONLINE (Admins: {len(ADMIN_IDS)})")
+    # Вітаємо кожного адміна при старті
+    for adm in ADMIN_IDS:
+        try: await client.send_message(adm, "✅ **СИСТЕМА ГОТОВА**\n" + ADMIN_HELP_TEXT)
+        except: pass
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
