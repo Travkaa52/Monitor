@@ -6,25 +6,29 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
-# Це забороняє паралельні запуски
 concurrency:
   group: neptun_production
   cancel-in-progress: true
 
 jobs:
-# ... далі без змін
   run-bot:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - name: Install Deps
-        run: pip install telethon
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiohttp telethon
+
       - name: Start Neptun
         env:
           API_ID: ${{ secrets.API_ID }}
