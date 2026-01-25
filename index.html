@@ -99,6 +99,28 @@
 
         .control-btn:active { background: var(--khaki); color: #000; }
 
+        /* МАРКЕР ТА СТРІЛКА */
+        .tactical-marker-wrap {
+            position: relative;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .unit-icon { width: 32px; height: 32px; filter: drop-shadow(0 0 2px #000); }
+
+        .course-arrow {
+            position: absolute;
+            color: var(--hazard);
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 0 0 3px #000;
+            transition: all 0.5s ease-in-out;
+            pointer-events: none;
+        }
+
         /* ШТОРКА СПИСКУ */
         .drawer {
             position: fixed; bottom: 0; left: 0; right: 0; height: 75vh;
@@ -118,9 +140,6 @@
             border-left: 4px solid var(--hazard);
             display: flex; justify-content: space-between; align-items: center;
         }
-
-        /* АНІМАЦІЯ МАРКЕРІВ */
-        .leaflet-marker-icon { transition: transform 0.5s ease-out; }
     </style>
 </head>
 <body>
@@ -130,7 +149,7 @@
     <div class="top-hud">
         <div class="hud-row">
             <div class="status-box">
-                <div style="font-weight: bold;">• MONITOR KH • <span id="sys-time" style="float:right">00:00</span></div>
+                <div style="font-weight: bold;">• MONITOR KH • <span id="sys-time">00:00</span></div>
                 <div style="color:var(--hazard); margin-top:4px;">
                     ЦІЛЕЙ: <span id="targetCount">0</span>
                     <span id="conn-status" style="float:right; color:#708238;">ONLINE</span>
@@ -169,26 +188,29 @@
         const ICONS_PATH = 'img/';
         let map, targets = new Map(), userPos = null;
 
-        // ШАРИ
+        // ШАРИ КАРТИ
         const baseLayers = {
             dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'),
             sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
             topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png')
         };
-        let currentLayer = 'dark';
+        let currentLayerKey = 'dark';
 
         function init() {
             map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 9);
             baseLayers.dark.addTo(map);
             
+            // GPS Логіка
             map.on('locationfound', (e) => {
                 userPos = e.latlng;
                 updateDistances();
             });
             map.locate({watch: true});
             
+            // Стартова синхронізація
             syncData();
-            setInterval(syncData, 5000);
+            setInterval(syncData, 5000); // Оновлення кожні 5 сек
+            
             setInterval(() => {
                 document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA', {hour: '2-digit', minute:'2-digit'});
             }, 1000);
@@ -196,7 +218,7 @@
 
         async function syncData() {
             try {
-                const res = await fetch(`${DATA_URL}?v=${Date.now()}`);
+                const res = await fetch(`${DATA_URL}?t=${Date.now()}`);
                 const data = await res.json();
                 processTargets(data);
                 document.getElementById('conn-status').innerText = 'ONLINE';
@@ -213,21 +235,34 @@
                 const id = String(obj.id);
                 activeIds.add(id);
                 
+                // Розрахунок повороту стрілки
+                const rotation = (obj.direction !== undefined && obj.direction !== null) ? obj.direction : null;
+                
+                const iconHtml = `
+                    <div class="tactical-marker-wrap">
+                        ${rotation !== null ? `<div class="course-arrow" style="transform: rotate(${rotation}deg) translateY(-20px)">▲</div>` : ''}
+                        <img src="${ICONS_PATH}${obj.type}.png" class="unit-icon">
+                    </div>
+                `;
+
+                const tacticalIcon = L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-icon',
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 20]
+                });
+
                 if (targets.has(id)) {
                     targets.get(id).marker.setLatLng([obj.lat, obj.lng]);
+                    targets.get(id).marker.setIcon(tacticalIcon);
                     targets.get(id).data = obj;
                 } else {
-                    const icon = L.icon({ 
-                        iconUrl: `${ICONS_PATH}${obj.type}.png`, 
-                        iconSize: [32, 32], 
-                        iconAnchor: [16, 16] 
-                    });
-                    const marker = L.marker([obj.lat, obj.lng], { icon }).addTo(map);
+                    const marker = L.marker([obj.lat, obj.lng], { icon: tacticalIcon }).addTo(map);
                     targets.set(id, { marker, data: obj, distance: Infinity });
                 }
             });
 
-            // Видалення старих
+            // Видалення неактивних
             targets.forEach((val, id) => {
                 if (!activeIds.has(id)) {
                     map.removeLayer(val.marker);
@@ -264,31 +299,31 @@
         }
 
         function toggleLayers() {
-            map.removeLayer(baseLayers[currentLayer]);
-            currentLayer = currentLayer === 'dark' ? 'sat' : (currentLayer === 'sat' ? 'topo' : 'dark');
-            baseLayers[currentLayer].addTo(map);
-            if (window.navigator.vibrate) window.navigator.vibrate(25);
+            map.removeLayer(baseLayers[currentLayerKey]);
+            if (currentLayerKey === 'dark') currentLayerKey = 'sat';
+            else if (currentLayerKey === 'sat') currentLayerKey = 'topo';
+            else currentLayerKey = 'dark';
+            baseLayers[currentLayerKey].addTo(map);
         }
 
         function toggleDrawer() {
             document.getElementById('listDrawer').classList.toggle('open');
-            if (window.navigator.vibrate) window.navigator.vibrate(15);
         }
 
         function focusTarget(lat, lng) {
-            map.flyTo([lat, lng], 12);
+            map.flyTo([lat, lng], 13);
             toggleDrawer();
         }
 
         function centerMap() {
             if (targets.size > 0) {
                 const group = new L.featureGroup(Array.from(targets.values()).map(t => t.marker));
-                map.fitBounds(group.getBounds().pad(0.2));
+                map.fitBounds(group.getBounds().pad(0.3));
             }
         }
 
         function useGPS() {
-            map.locate({setView: true, maxZoom: 13});
+            map.locate({setView: true, maxZoom: 14});
         }
 
         window.onload = init;
