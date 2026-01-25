@@ -19,11 +19,7 @@ API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "") 
-
-# Отримуємо список ID через кому, наприклад: 1234567,8901234
-admin_raw = os.getenv("ADMIN_IDS", "0")
-ADMIN_IDS = [int(i.strip()) for i in admin_raw.split(",") if i.strip().isdigit()]
-
+ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i.strip().isdigit()]
 CHANNEL_ID = 'monitorkh1654'
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -35,22 +31,44 @@ SYMBOLS = {
     "aircraft": "✈️ Авіація", "unknown": "❓ Невідомо"
 }
 
-ADMIN_HELP_TEXT = """
-🚀 **NEPTUN TACTICAL TERMINAL**
-Команди керування (доступно всім адмінам):
-
-🔢 `1` або `/list` — Керування активними цілями.
-📊 `/stats` — Статистика об'єктів та баз.
-🔍 `/geo [назва]` — Тестовий пошук координат.
-➕ `/add [тип] [місто]` — Ручне додавання мітки.
-🧹 `/clear` — Очистити карту (скидання targets.json).
-❓ `/help` — Виклик цього меню.
-"""
+DIRECTION_MAP = {
+    "північ": 0, "північніше": 0, "пн": 0,
+    "північний схід": 45, "пн-сх": 45,
+    "схід": 90, "східніше": 90, "сх": 90,
+    "південний схід": 135, "пд-сх": 135,
+    "південь": 180, "південніше": 180, "пд": 180,
+    "південний захід": 225, "пд-зх": 225,
+    "захід": 270, "західніше": 270, "зх": 270,
+    "північний захід": 315, "пн-зх": 315
+}
 
 pending_targets = {}
 delete_queue = {}
 
+# ================= ЛОГІКА ПАРСИНГУ =================
+
+def parse_direction(text):
+    """Визначає кут напрямку на основі ключових слів."""
+    text_lc = text.lower()
+    for key, deg in DIRECTION_MAP.items():
+        if key in text_lc:
+            return deg
+    return None
+
+def clean_location_name(text):
+    """Витягує чисту назву населеного пункту."""
+    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|БПЛА|Тип|КАБ|Ракета|Шахед|Мопед|Зафіксовано|Попередньо)', '', text, flags=re.IGNORECASE).strip()
+    # Розбиваємо текст по роздільниках напрямку
+    parts = re.split(r'(курсом|на|в напрямку|через|в бік)', clean, flags=re.IGNORECASE)
+    name = parts[0].strip().replace('"', '').replace('«', '').replace('»', '')
+    return name if len(name) > 2 else None
+
+def extract_count(text):
+    match = re.search(r'(\d+)', text)
+    return int(match.group(1)) if match else 1
+
 # ================= ГЕО ТА БД =================
+
 async def get_coords_online(place_name):
     query = f"{place_name}, Харківська область, Україна"
     url = "https://nominatim.openstreetmap.org/search"
@@ -90,146 +108,117 @@ def commit_and_push():
         subprocess.run(["git", "push"], check=False)
     except: pass
 
-def extract_count(text):
-    match = re.search(r'(\d+)', text)
-    return int(match.group(1)) if match else 1
+# ================= ОБРОБКА КАНАЛУ =================
 
-def advanced_parse(text):
-    clean = re.sub(r'(🚨|⚠️|Увага|На даний час|зафіксовано|рух|вектор|напрямок|бпла|тип|каб|ракета|шахед|мопед)', '', text, flags=re.IGNORECASE).strip()
-    return re.sub(r'["\'«»]', '', clean.split('курсом')[0].split('на')[0].strip())
-
-# ================= АДМІН ПАНЕЛЬ =================
-@client.on(events.NewMessage(incoming=True, from_users=ADMIN_IDS))
-async def admin_panel(event):
-    text = event.raw_text.lower()
-    
-    if text in ['/help', '/start', 'допомога']:
-        await event.reply(ADMIN_HELP_TEXT)
-
-    elif text in ['1', '/1', '/list']:
-        targets = db('targets.json')
-        active = [t for t in targets if t.get('status') == 'active']
-        if not active: return await event.reply("📭 Активних цілей немає.")
-        for t in active:
-            btns = [[Button.inline("➕", f"edit_cnt:plus:{t['id']}"), Button.inline("➖", f"edit_cnt:minus:{t['id']}")],
-                    [Button.inline("🗑 Видалити", f"ask_del:{t['id']}")]]
-            await event.reply(f"📡 **Ціль:** {t['label']}\n🔢 Кількість: **{t['count']}**", buttons=btns)
-
-    elif text == '/stats':
-        targets = db('targets.json')
-        types = db('types.json')
-        active = len([t for t in targets if t.get('status') == 'active'])
-        await event.reply(f"📊 **СТАТИСТИКА:**\nАктивно цілей: `{active}`\nБаза типів: `{len(types)}` кат.")
-
-    elif text == '/clear':
-        db('targets.json', [])
-        await event.reply("🧹 Карта очищена.")
-
-    elif text.startswith('/geo'):
-        place = text.replace('/geo', '').strip()
-        res = await get_coords_online(place)
-        if res: await event.reply(f"📍 **{res[2]}**\n`{res[0]}, {res[1]}`")
-        else: await event.reply("❌ Не знайдено.")
-
-    elif text.startswith('/add'):
-        try:
-            p = text.split(' ')
-            t_type, place = p[1], " ".join(p[2:])
-            res = await get_coords_online(place)
-            if res:
-                new_t = {
-                    "id": int(datetime.now().timestamp()), "type": t_type, "count": 1, "status": "active",
-                    "reason": "", "lat": res[0], "lng": res[1],
-                    "label": f"{SYMBOLS.get(t_type, '❓')} | {res[2]} (MANUAL)",
-                    "time": datetime.now().strftime("%H:%M"),
-                    "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
-                }
-                data = db('targets.json'); data.append(new_t); db('targets.json', data)
-                await event.reply(f"✅ Додано: {res[2]}")
-        except: await event.reply("Формат: `/add drone місто`")
-
-# ================= МОНІТОРИНГ КАНАЛУ =================
 @client.on(events.NewMessage)
 async def handle_channel(event):
     if event.chat and getattr(event.chat, 'username', '') == CHANNEL_ID:
         raw_text = event.raw_text
-        target_name = advanced_parse(raw_text)
-        if not target_name or len(target_name) < 3: return
-
+        
+        # 1. Визначаємо локацію та координати
+        target_name = clean_location_name(raw_text)
+        if not target_name: return
+        
         found_point = await get_coords_online(target_name)
         if not found_point: return
 
+        # 2. Визначаємо тип
         types_db = db('types.json')
-        text = raw_text.lower()
+        text_lc = raw_text.lower()
         final_type = None
-        if any(w in text for w in ["робота ппо", "працює ппо"]): final_type = "air_defense"
+        
+        if any(w in text_lc for w in ["робота ппо", "працює ппо"]): final_type = "air_defense"
         
         if not final_type:
             for t_type, keywords in types_db.items():
-                if any(word in text for word in keywords):
+                if any(word in text_lc for word in keywords):
                     final_type = t_type; break
         
+        # 3. Напрямок
+        direction = parse_direction(raw_text)
+
         if not final_type:
             final_type = "unknown"
             pending_targets[event.id] = {"term": target_name.lower()}
             btns = [[Button.inline("🛵 Дрон", f"learn:drone:{event.id}"), Button.inline("🚀 Ракета", f"learn:missile:{event.id}")],
                     [Button.inline("☄️ КАБ", f"learn:kab:{event.id}"), Button.inline("💥 ППО", f"learn:air_defense:{event.id}")]]
-            # Надсилаємо сповіщення ВСІМ адмінам
             for adm in ADMIN_IDS:
                 try: await client.send_message(adm, f"❓ **Новий тип!**\n`{raw_text}`", buttons=btns)
                 except: pass
 
+        # 4. Формуємо об'єкт
         new_target = {
             "id": event.id, "type": final_type, "count": extract_count(raw_text),
             "status": "active", "reason": "", "lat": found_point[0], "lng": found_point[1],
+            "direction": direction,
             "label": f"{SYMBOLS.get(final_type, '❓')} | {found_point[2]}",
             "time": datetime.now().strftime("%H:%M"),
             "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
         }
-        data = db('targets.json'); data.append(new_target); db('targets.json', data)
+        
+        data = db('targets.json')
+        # Оновлюємо, якщо повідомлення редаговане
+        data = [t for t in data if t['id'] != event.id]
+        data.append(new_target)
+        db('targets.json', data)
 
-# ================= CALLBACKS =================
+# ================= АДМІН ПАНЕЛЬ ТА CALLBACKS =================
+
+@client.on(events.NewMessage(from_users=ADMIN_IDS))
+async def admin_cmd(event):
+    text = event.raw_text.lower()
+    if text in ['1', '/list']:
+        targets = db('targets.json')
+        active = [t for t in targets if t.get('status') == 'active']
+        if not active: return await event.reply("📭 Активних цілей немає.")
+        for t in active:
+            btns = [
+                [Button.inline("➕", f"edit_cnt:plus:{t['id']}"), Button.inline("➖", f"edit_cnt:minus:{t['id']}")],
+                [Button.inline("🧭 Курс", f"set_dir_menu:{t['id']}")],
+                [Button.inline("🗑 Видалити", f"ask_del:{t['id']}")]
+            ]
+            await event.reply(f"📡 **Ціль:** {t['label']}\n🔢 Кількість: **{t['count']}**\n🧭 Курс: {t.get('direction', 'Немає')}°", buttons=btns)
+
 @client.on(events.CallbackQuery)
-async def callback_handler(event):
-    if event.sender_id not in ADMIN_IDS: return # Тільки для адмінів
+async def cb_handler(event):
+    if event.sender_id not in ADMIN_IDS: return
+    data = event.data.decode(); tid = data.split(":")[-1]; targets = db('targets.json')
     
-    data = event.data.decode(); uid = event.sender_id; targets = db('targets.json')
     if data.startswith("learn:"):
-        _, cat, tid = data.split(":")
+        _, cat, _ = data.split(":")
         info = pending_targets.pop(int(tid), None)
         if info:
             t_db = db('types.json')
             if cat not in t_db: t_db[cat] = []
             if info['term'] not in t_db[cat]: t_db[cat].append(info['term']); db('types.json', t_db)
-            for t in targets:
-                if t['id'] == int(tid): t['type'] = cat; t['label'] = t['label'].replace(SYMBOLS["unknown"], SYMBOLS[cat])
-            db('targets.json', targets); await event.edit(f"✅ Вивчено -> {SYMBOLS[cat]}")
-    elif data.startswith("edit_cnt:"):
-        _, act, tid = data.split(":")
+            await event.edit(f"✅ Тип {cat} вивчено.")
+
+    elif data.startswith("set_dir_menu:"):
+        dir_btns = [
+            [Button.inline("⬆️ Пн", f"save_dir:0:{tid}"), Button.inline("↗️ Пн-Сх", f"save_dir:45:{tid}")],
+            [Button.inline("➡️ Сх", f"save_dir:90:{tid}"), Button.inline("⬇️ Пд", f"save_dir:180:{tid}")],
+            [Button.inline("⬅️ Зх", f"save_dir:270:{tid}"), Button.inline("🚫 Скинути", f"save_dir:none:{tid}")]
+        ]
+        await event.edit("🧭 Оберіть напрямок:", buttons=dir_btns)
+
+    elif data.startswith("save_dir:"):
+        _, deg, _ = data.split(":")
         for t in targets:
-            if t['id'] == int(tid):
-                t['count'] = t['count'] + 1 if act == "plus" else max(1, t['count'] - 1)
-                db('targets.json', targets)
-                await event.edit(f"📡 **Ціль:** {t['label']}\n🔢 Кількість: **{t['count']}**", 
-                                 buttons=[[Button.inline("➕", f"edit_cnt:plus:{tid}"), Button.inline("➖", f"edit_cnt:minus:{tid}")],
-                                          [Button.inline("🗑 Видалити", f"ask_del:{tid}")]])
+            if t['id'] == int(tid): t['direction'] = int(deg) if deg != "none" else None
+        db('targets.json', targets); await event.edit("✅ Напрямок оновлено.")
+
     elif data.startswith("ask_del:"):
-        delete_queue[uid] = int(data.split(":")[1])
+        delete_queue[event.sender_id] = int(tid)
         await event.edit("⚠️ Причина:", buttons=[[Button.inline("✅ Знищено", "kill:Знищено"), Button.inline("📉 Впало", "kill:Впало")]])
+
     elif data.startswith("kill:"):
-        reason = data.split(":")[1]; tid = delete_queue.pop(uid, None)
+        reason = data.split(":")[1]; target_id = delete_queue.pop(event.sender_id, None)
         for t in targets:
-            if t['id'] == tid: t['status'], t['reason'] = 'archived', reason
+            if t['id'] == target_id: t['status'], t['reason'] = 'archived', reason
         db('targets.json', targets); await event.edit(f"📥 Архів: {reason}")
 
-# ================= ЗАПУСК =================
 async def main():
     await client.start(bot_token=BOT_TOKEN)
-    logger.info(f"💎 NEPTUN ONLINE (Admins: {len(ADMIN_IDS)})")
-    # Вітаємо кожного адміна при старті
-    for adm in ADMIN_IDS:
-        try: await client.send_message(adm, "✅ **СИСТЕМА ГОТОВА**\n" + ADMIN_HELP_TEXT)
-        except: pass
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
