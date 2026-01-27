@@ -3,24 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#1a1c12">
-    <link rel="manifest" href="manifest.json">
-    
-    <title>MONITOR KHARKIV | TACTICAL PWA</title>
+    <meta name="theme-color" content="#0d0e0a">
+    <title>MONITOR KHARKIV | ELITE TACTICAL</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
     
     <style>
         :root {
-            --army-bg: #1a1c12;
-            --multicam-dark: #4b5320;
-            --khaki: #c3b091;
-            --hazard: #d2691e;
-            --danger: #ff3c3c;
+            --army-bg: #0d0e0a;
+            --multicam-dark: #353b1f;
+            --khaki: #b5ae94;
+            --hazard: #ff9d00;
+            --danger: #ff4444;
+            --ally: #00ff00;
             --font: 'JetBrains Mono', monospace;
         }
 
@@ -28,203 +26,281 @@
 
         body {
             font-family: var(--font);
-            background: #000;
+            background: var(--army-bg);
             color: var(--khaki);
             height: 100vh;
             overflow: hidden;
-            display: flex;
-            flex-direction: column;
+            display: flex; flex-direction: column;
             text-transform: uppercase;
         }
 
-        #map { position: absolute; inset: 0; z-index: 1; }
-
-        /* HUD ЗВЕРХУ */
-        .top-hud {
-            position: absolute; 
-            top: env(safe-area-inset-top, 10px); 
-            left: 10px; right: 10px;
-            z-index: 1000;
+        /* CRT Ефект поверх усього */
+        body::after {
+            content: " ";
+            position: fixed; inset: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 3px 100%;
+            z-index: 5000;
             pointer-events: none;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            opacity: 0.4;
         }
 
-        .hud-row { display: flex; justify-content: space-between; gap: 8px; pointer-events: auto; }
+        #loader {
+            position: fixed; inset: 0; background: #000; z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+            transition: 1.5s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+
+        .term-container { width: 90%; max-width: 600px; padding: 25px; border: 1px solid var(--multicam-dark); position: relative; }
+        .log { font-size: 11px; margin-bottom: 6px; color: var(--hazard); opacity: 0; transform: translateX(-10px); animation: logIn 0.3s forwards; }
+        @keyframes logIn { to { opacity: 1; transform: translateX(0); } }
+
+        #map { position: absolute; inset: 0; z-index: 1; background: #000; filter: contrast(1.1) brightness(0.9) sepia(0.1); }
+
+        /* ВЕРХНЯ ПАНЕЛЬ */
+        .top-hud {
+            position: absolute; top: env(safe-area-inset-top, 10px); left: 8px; right: 8px;
+            z-index: 1000; pointer-events: none; display: flex; flex-direction: column; gap: 10px;
+        }
+        .hud-row { display: flex; justify-content: space-between; gap: 10px; pointer-events: auto; }
 
         .status-box {
-            background: rgba(26, 28, 18, 0.95);
+            background: rgba(13, 14, 10, 0.92);
             border: 1px solid var(--multicam-dark);
-            padding: 8px 12px;
+            border-left: 4px solid var(--hazard);
+            padding: 10px 15px;
             font-size: 10px;
-            backdrop-filter: blur(8px);
+            backdrop-filter: blur(10px);
             flex: 1;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.8);
+            position: relative;
+        }
+
+        .status-box::before {
+            content: "ENCRYPTED CHANNEL";
+            position: absolute; bottom: -12px; right: 5px;
+            font-size: 7px; color: var(--hazard); opacity: 0.5;
         }
 
         .top-btn {
-            background: var(--hazard);
-            color: #000;
-            border: none;
-            padding: 8px 15px;
-            font-size: 9px;
-            font-weight: 800;
+            background: linear-gradient(135deg, var(--hazard) 0%, #b85c00 100%);
+            color: #000; border: none; padding: 10px 18px;
+            font-size: 9px; font-weight: 900;
             clip-path: polygon(10% 0, 100% 0, 100% 70%, 90% 100%, 0 100%, 0 30%);
-            cursor: pointer;
+            cursor: pointer; transition: 0.2s;
+        }
+        .top-btn:active { filter: brightness(1.5); transform: translateY(2px); }
+
+        /* МАРКЕР ТА РАДАР */
+        .user-location-container { transition: transform 0.15s cubic-bezier(0, 0, 0.2, 1); }
+        .user-arrow {
+            width: 0; height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-bottom: 18px solid var(--ally);
+            filter: drop-shadow(0 0 8px var(--ally));
         }
 
-        /* НИЖНЯ ПАНЕЛЬ */
+        /* КНОПКИ ЗНИЗУ */
         .bottom-controls {
-            position: absolute;
-            bottom: 0; left: 0; right: 0;
-            z-index: 2000;
-            background: var(--army-bg);
-            border-top: 2px solid var(--multicam-dark);
-            padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 6px;
+            position: absolute; bottom: 0; left: 0; right: 0; z-index: 2000;
+            background: linear-gradient(0deg, rgba(13, 14, 10, 1) 0%, rgba(13, 14, 10, 0.8) 100%);
+            border-top: 1px solid var(--multicam-dark);
+            padding: 15px 12px calc(15px + env(safe-area-inset-bottom));
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
         }
 
         .control-btn {
-            background: var(--multicam-dark);
-            border: 1px solid var(--khaki);
-            color: var(--khaki);
-            padding: 14px 2px;
-            font-size: 8px;
-            font-weight: 700;
-            text-align: center;
-            border-radius: 4px;
-        }
-
-        .control-btn:active { background: var(--khaki); color: #000; }
-
-        /* МАРКЕР ТА СТРІЛКА */
-        .tactical-marker-wrap {
-            position: relative;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .unit-icon { width: 32px; height: 32px; filter: drop-shadow(0 0 2px #000); }
-
-        .course-arrow {
-            position: absolute;
-            color: var(--hazard);
-            font-size: 18px;
-            font-weight: bold;
-            text-shadow: 0 0 3px #000;
-            transition: all 0.5s ease-in-out;
-            pointer-events: none;
-        }
-
-        /* ШТОРКА СПИСКУ */
-        .drawer {
-            position: fixed; bottom: 0; left: 0; right: 0; height: 75vh;
-            background: var(--army-bg); z-index: 2100;
-            border-top: 3px solid var(--hazard);
-            border-radius: 15px 15px 0 0;
-            transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            display: flex; flex-direction: column;
-        }
-        .drawer.open { transform: translateY(0); }
-        .drawer-header { padding: 18px; border-bottom: 1px solid var(--multicam-dark); display: flex; justify-content: space-between; align-items: center; }
-
-        .target-item {
-            background: rgba(255,255,255,0.03);
+            background: rgba(53, 59, 31, 0.2);
             border: 1px solid var(--multicam-dark);
-            margin-bottom: 8px; padding: 15px;
-            border-left: 4px solid var(--hazard);
-            display: flex; justify-content: space-between; align-items: center;
+            color: var(--khaki);
+            padding: 14px 5px; font-size: 9px; font-weight: 800;
+            text-align: center; cursor: pointer; position: relative;
+            transition: all 0.1s;
         }
+
+        .control-btn::before, .control-btn::after {
+            content: ''; position: absolute; width: 6px; height: 6px;
+            border: 1px solid var(--hazard); opacity: 0.4;
+        }
+        .control-btn::before { top: 0; left: 0; border-right: none; border-bottom: none; }
+        .control-btn::after { bottom: 0; right: 0; border-left: none; border-top: none; }
+
+        .control-btn:active { background: var(--hazard); color: #000; }
+
+        .drawer {
+            position: fixed; bottom: 0; left: 0; right: 0; height: 70vh;
+            background: var(--army-bg); z-index: 2100;
+            border-top: 2px solid var(--hazard);
+            transform: translateY(100%); transition: 0.4s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+        .drawer.open { transform: translateY(0); box-shadow: 0 -10px 40px rgba(0,0,0,0.9); }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
 
+    <div id="loader">
+        <div class="term-container" id="logs">
+            <div style="position:absolute; top:-10px; left:10px; background:#000; padding:0 10px; font-size:10px;">BOOT_SEQUENCE</div>
+        </div>
+    </div>
+
     <div class="top-hud">
         <div class="hud-row">
             <div class="status-box">
-                <div style="font-weight: bold;">• MONITOR KH • <span id="sys-time">00:00</span></div>
-                <div style="color:var(--hazard); margin-top:4px;">
-                    ЦІЛЕЙ: <span id="targetCount">0</span>
-                    <span id="conn-status" style="float:right; color:#708238;">ONLINE</span>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="letter-spacing: 2px;">● MONITOR_KH_OS</span>
+                    <span id="sys-time" style="color:var(--hazard); font-weight: bold;">00:00:00</span>
+                </div>
+                <div style="margin-top: 6px; display: flex; gap: 15px; font-size: 9px;">
+                    <span>ЦІЛІ: <span id="targetCount" style="color:#fff;">0</span></span>
+                    <span>NET: <span id="conn-status" style="color:var(--ally);">STABLE</span></span>
+                    <span style="margin-left:auto;">v4.2.0_TAC</span>
                 </div>
             </div>
         </div>
         <div class="hud-row">
-            <button class="top-btn" onclick="window.open('https://send.monobank.ua/jar/6R3gd9Ew8w')">ПІДТРИМАТИ</button>
-            <button class="top-btn" style="background:#4b5320; color:#fff" onclick="toggleLayers()">ШАР КАРТИ</button>
+            <button class="top-btn" onclick="playClick(); window.open('https://send.monobank.ua/jar/6R3gd9Ew8w')">SUPPORT</button>
+            <button class="top-btn" onclick="playClick(); toggleLayers()">MAP_MODE</button>
         </div>
     </div>
 
     <div class="drawer" id="listDrawer">
-        <div class="drawer-header">
-            <strong style="font-size: 14px;">АКТИВНІ КОНТАКТИ</strong>
-            <span onclick="toggleDrawer()" style="color:var(--hazard); font-weight: bold; padding: 5px;">[ ЗАКРИТИ ]</span>
+        <div style="padding: 20px; border-bottom: 1px solid var(--multicam-dark); display:flex; justify-content: space-between;">
+            <strong style="letter-spacing: 1px;">ACTIVE_CONTACTS</strong>
+            <span onclick="toggleDrawer()" style="color:var(--hazard); cursor:pointer;">[ CLOSE ]</span>
         </div>
-        <div id="targetsList" style="flex:1; overflow-y:auto; padding:12px;"></div>
+        <div id="targetsList" style="overflow-y:auto; height:calc(100% - 60px); padding:15px;"></div>
     </div>
 
     <div class="bottom-controls">
-        <button class="control-btn" onclick="toggleDrawer()">СПИСОК</button>
-        <button class="control-btn" onclick="centerMap()">ЦЕНТР</button>
-        <button class="control-btn" onclick="useGPS()">МІЙ GPS</button>
-        <button class="control-btn" onclick="location.reload()">ОНОВИТИ</button>
+        <button class="control-btn" onclick="playClick(); toggleDrawer()">LIST</button>
+        <button class="control-btn" onclick="playClick(); centerMap()">CENTER</button>
+        <button class="control-btn" onclick="playClick(); useGPS()">MY_GPS</button>
+        <button class="control-btn" onclick="playClick(); location.reload()">RESET</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // РЕЄСТРАЦІЯ PWA
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js');
-        }
-
         const DATA_URL = 'targets.json';
         const ICONS_PATH = 'img/';
-        let map, targets = new Map(), userPos = null;
+        let map, targets = new Map(), userPos = null, userMarker = null, rangeRings = [];
 
-        // ШАРИ КАРТИ
         const baseLayers = {
             dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'),
-            sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
-            topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png')
+            sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}')
         };
-        let currentLayerKey = 'dark';
+        let currentLayer = 'dark';
+
+        // Синтезатор звуку кліку (Web Audio API)
+        function playClick() {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(150, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.05, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.1);
+        }
 
         function init() {
-            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 9);
+            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 10);
             baseLayers.dark.addTo(map);
             
-            // GPS Логіка
+            const userIcon = L.divIcon({
+                className: 'user-location-container',
+                html: '<div class="user-arrow"></div>',
+                iconSize: [20, 20], iconAnchor: [10, 10]
+            });
+
             map.on('locationfound', (e) => {
                 userPos = e.latlng;
+                if (!userMarker) {
+                    userMarker = L.marker(e.latlng, { icon: userIcon, zIndexOffset: 2000 }).addTo(map);
+                    updateRangeRings(e.latlng);
+                } else {
+                    userMarker.setLatLng(e.latlng);
+                    updateRangeRings(e.latlng);
+                }
                 updateDistances();
             });
-            map.locate({watch: true});
+
+            map.locate({watch: true, enableHighAccuracy: true});
             
-            // Стартова синхронізація
+            if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientationabsolute', handleRot, true);
+                window.addEventListener('deviceorientation', handleRot, true);
+            }
+
+            startLogs();
             syncData();
-            setInterval(syncData, 5000); // Оновлення кожні 5 сек
-            
-            setInterval(() => {
-                document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA', {hour: '2-digit', minute:'2-digit'});
-            }, 1000);
+            setInterval(syncData, 5000);
+            setInterval(updateClock, 1000);
+        }
+
+        function updateRangeRings(latlng) {
+            rangeRings.forEach(r => map.removeLayer(r));
+            rangeRings = [2000, 5000, 10000].map(dist => 
+                L.circle(latlng, {
+                    radius: dist,
+                    color: 'var(--ally)',
+                    weight: 1,
+                    fillOpacity: 0.03,
+                    dashArray: '5, 10',
+                    interactive: false
+                }).addTo(map)
+            );
+        }
+
+        function handleRot(e) {
+            const heading = e.webkitCompassHeading || (360 - e.alpha);
+            if (heading && userMarker) {
+                const el = userMarker.getElement();
+                if (el) el.style.transform = `${el.style.transform.split('rotate')[0]} rotate(${heading}deg)`;
+            }
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('sys-time').innerText = now.toLocaleTimeString('uk-UA');
+        }
+
+        function startLogs() {
+            const l = document.getElementById('logs');
+            const lines = ["> MNT_OS V.4.2 BOOTING...", "> KERNEL_OK", "> SYNCING SATELLITE...", "> MAP_RENDER_SUCCESS", "> READY"];
+            lines.forEach((line, i) => {
+                setTimeout(() => {
+                    const d = document.createElement('div');
+                    d.className = 'log';
+                    d.innerText = line;
+                    l.appendChild(d);
+                    if (i === lines.length - 1) {
+                        setTimeout(() => {
+                            document.getElementById('loader').style.opacity = '0';
+                            setTimeout(() => document.getElementById('loader').style.display = 'none', 1500);
+                        }, 800);
+                    }
+                }, i * 250);
+            });
         }
 
         async function syncData() {
             try {
-                const res = await fetch(`${DATA_URL}?t=${Date.now()}`);
+                const res = await fetch(`${DATA_URL}?v=${Date.now()}`);
                 const data = await res.json();
                 processTargets(data);
-                document.getElementById('conn-status').innerText = 'ONLINE';
-                document.getElementById('conn-status').style.color = '#708238';
+                document.getElementById('conn-status').innerText = 'STABLE';
+                document.getElementById('conn-status').style.color = 'var(--ally)';
             } catch (e) {
-                document.getElementById('conn-status').innerText = 'ERROR';
+                document.getElementById('conn-status').innerText = 'LOST';
                 document.getElementById('conn-status').style.color = 'var(--danger)';
             }
         }
@@ -232,44 +308,16 @@
         function processTargets(data) {
             const activeIds = new Set();
             data.forEach(obj => {
-                const id = String(obj.id);
-                activeIds.add(id);
-                
-                // Розрахунок повороту стрілки
-                const rotation = (obj.direction !== undefined && obj.direction !== null) ? obj.direction : null;
-                
-                const iconHtml = `
-                    <div class="tactical-marker-wrap">
-                        ${rotation !== null ? `<div class="course-arrow" style="transform: rotate(${rotation}deg) translateY(-20px)">▲</div>` : ''}
-                        <img src="${ICONS_PATH}${obj.type}.png" class="unit-icon">
-                    </div>
-                `;
-
-                const tacticalIcon = L.divIcon({
-                    html: iconHtml,
-                    className: 'custom-icon',
-                    iconSize: [40, 40],
-                    iconAnchor: [20, 20]
-                });
-
+                const id = String(obj.id); activeIds.add(id);
                 if (targets.has(id)) {
                     targets.get(id).marker.setLatLng([obj.lat, obj.lng]);
-                    targets.get(id).marker.setIcon(tacticalIcon);
-                    targets.get(id).data = obj;
                 } else {
-                    const marker = L.marker([obj.lat, obj.lng], { icon: tacticalIcon }).addTo(map);
+                    const icon = L.icon({ iconUrl: `${ICONS_PATH}${obj.type}.png`, iconSize: [32, 32] });
+                    const marker = L.marker([obj.lat, obj.lng], { icon }).addTo(map);
                     targets.set(id, { marker, data: obj, distance: Infinity });
                 }
             });
-
-            // Видалення неактивних
-            targets.forEach((val, id) => {
-                if (!activeIds.has(id)) {
-                    map.removeLayer(val.marker);
-                    targets.delete(id);
-                }
-            });
-
+            targets.forEach((val, id) => { if (!activeIds.has(id)) { map.removeLayer(val.marker); targets.delete(id); } });
             document.getElementById('targetCount').innerText = targets.size;
             updateDistances();
         }
@@ -277,54 +325,31 @@
         function updateDistances() {
             const listContainer = document.getElementById('targetsList');
             const sorted = Array.from(targets.values());
-
             if (userPos) {
-                sorted.forEach(t => {
-                    t.distance = (map.distance(userPos, t.marker.getLatLng()) / 1000).toFixed(1);
-                });
+                sorted.forEach(t => { t.distance = (map.distance(userPos, t.marker.getLatLng()) / 1000).toFixed(1); });
                 sorted.sort((a, b) => a.distance - b.distance);
             }
-
             listContainer.innerHTML = sorted.map(t => `
-                <div class="target-item" onclick="focusTarget(${t.data.lat}, ${t.data.lng})">
-                    <div>
-                        <div style="font-weight:bold; font-size:12px;">${t.data.label}</div>
-                        <div style="font-size:9px; opacity:0.6; margin-top:3px;">${t.data.time} | ${t.data.type}</div>
+                <div class="target-item" style="background:rgba(53,59,31,0.1); border:1px solid var(--multicam-dark); padding:15px; margin-bottom:10px; border-left:4px solid var(--hazard);" onclick="focusTarget(${t.data.lat}, ${t.data.lng})">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="font-weight:bold;">${t.data.label}</span>
+                        <span style="color:var(--hazard);">${t.distance} KM</span>
                     </div>
-                    <div style="color:var(--hazard); font-weight:bold; font-size:14px;">
-                        ${t.distance !== Infinity ? t.distance + ' КМ' : '--'}
-                    </div>
+                    <div style="font-size:10px; opacity:0.6; margin-top:5px;">${t.data.type} | ${t.data.time}</div>
                 </div>
             `).join('');
         }
 
         function toggleLayers() {
-            map.removeLayer(baseLayers[currentLayerKey]);
-            if (currentLayerKey === 'dark') currentLayerKey = 'sat';
-            else if (currentLayerKey === 'sat') currentLayerKey = 'topo';
-            else currentLayerKey = 'dark';
-            baseLayers[currentLayerKey].addTo(map);
+            map.removeLayer(baseLayers[currentLayer]);
+            currentLayer = currentLayer === 'dark' ? 'sat' : 'dark';
+            baseLayers[currentLayer].addTo(map);
         }
 
-        function toggleDrawer() {
-            document.getElementById('listDrawer').classList.toggle('open');
-        }
-
-        function focusTarget(lat, lng) {
-            map.flyTo([lat, lng], 13);
-            toggleDrawer();
-        }
-
-        function centerMap() {
-            if (targets.size > 0) {
-                const group = new L.featureGroup(Array.from(targets.values()).map(t => t.marker));
-                map.fitBounds(group.getBounds().pad(0.3));
-            }
-        }
-
-        function useGPS() {
-            map.locate({setView: true, maxZoom: 14});
-        }
+        function toggleDrawer() { document.getElementById('listDrawer').classList.toggle('open'); }
+        function focusTarget(lat, lng) { map.flyTo([lat, lng], 13); toggleDrawer(); }
+        function centerMap() { if (targets.size > 0) { const g = new L.featureGroup(Array.from(targets.values()).map(t => t.marker)); map.fitBounds(g.getBounds().pad(0.3)); } }
+        function useGPS() { map.locate({setView: true, maxZoom: 13}); }
 
         window.onload = init;
     </script>
