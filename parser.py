@@ -2,25 +2,24 @@ import os
 import re
 import json
 import asyncio
-import threading
 import logging
 import subprocess
 import aiohttp
+import threading
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 
-# Налаштування логів
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("NEPTUN")
+# ================= НАЛАШТУВАННЯ =================
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("TACTICAL_PARSER")
 
-# ================= КОНФІГУРАЦІЯ =================
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "") 
-ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i.strip().isdigit()]
 CHANNEL_ID = 'monitorkh1654'
+ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i.strip().isdigit()]
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 db_lock = threading.Lock()
@@ -31,110 +30,138 @@ SYMBOLS = {
     "aircraft": "✈️ Авіація", "unknown": "❓ Невідомо"
 }
 
-DIRECTION_MAP = {
-    "північ": 0, "північніше": 0, "пн": 0,
-    "північний схід": 45, "пн-сх": 45,
-    "схід": 90, "східніше": 90, "сх": 90,
-    "південний схід": 135, "пд-сх": 135,
-    "південь": 180, "південніше": 180, "пд": 180,
-    "південний захід": 225, "пд-зх": 225,
-    "захід": 270, "західніше": 270, "зх": 270,
-    "північний захід": 315, "пн-зх": 315
-}
+# ================= ДОПОМІЖНІ ФУНКЦІЇ =================
 
-# ================= ЛОГІКА БД ТА ГІТ =================
-
-def db(file, data=None):
-    with db_lock:
-        try:
-            if data is None:
-                if not os.path.exists(file): return []
-                with open(file, 'r', encoding='utf-8') as f: return json.load(f)
-            else:
-                with open(file, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                commit_and_push()
-        except Exception as e:
-            logger.error(f"БД error: {e}")
-            return []
-
-def commit_and_push():
+def git_sync():
+    """Синхронізація з репозиторієм."""
     try:
-        subprocess.run(["git", "add", "targets.json", "types.json"], check=False)
+        subprocess.run(["git", "config", "user.name", "TacticalBot"], check=True)
+        subprocess.run(["git", "config", "user.email", "bot@tactical.internal"], check=True)
+        subprocess.run(["git", "add", "targets.json", "types.json"], check=True)
+        # [skip ci] запобігає повторному запуску GitHub Actions
         subprocess.run(["git", "commit", "-m", "📡 Tactical Update [skip ci]"], check=False)
-        subprocess.run(["git", "push"], check=False)
-    except: pass
+        subprocess.run(["git", "push"], check=True)
+        logger.info("✅ Дані синхронізовано з GitHub")
+    except Exception as e:
+        logger.error(f"❌ Помилка Git: {e}")
 
-async def auto_cleanup():
-    """Видаляє цілі, час яких вичерпано"""
+def load_db(file):
+    if not os.path.exists(file): return [] if file == 'targets.json' else {}
+    with open(file, 'r', encoding='utf-8') as f:
+        try: return json.load(f)
+        except: return [] if file == 'targets.json' else {}
+
+def save_db(file, data):
+    with db_lock:
+        with open(file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        git_sync()
+
+# ================= ЛОГІКА ОЧИЩЕННЯ (5 ХВИЛИН) =================
+
+async def auto_cleanup_task():
+    """Видаляє цілі, термін дії яких вичерпано."""
     while True:
-        data = db('targets.json')
-        now = datetime.now()
-        new_data = [t for t in data if datetime.fromisoformat(t['expire_at']) > now and t['status'] == 'active']
-        if len(new_data) != len(data):
-            db('targets.json', new_data)
-        await asyncio.sleep(60)
+        try:
+            targets = load_db('targets.json')
+            if targets:
+                now = datetime.now()
+                # Фільтруємо лише активні цілі, час expire_at яких ще не настав
+                filtered = [t for t in targets if datetime.fromisoformat(t['expire_at']) > now]
+                
+                if len(filtered) != len(targets):
+                    logger.info(f"🧹 Очистка: видалено {len(targets) - len(filtered)} об'єктів")
+                    save_db('targets.json', filtered)
+        except Exception as e:
+            logger.error(f"Помилка в таску очищення: {e}")
+        
+        await asyncio.sleep(30) # Перевірка кожні 30 секунд
 
-# ================= ПАРСИНГ ТА ОБРОБКА =================
+# ================= ПАРСИНГ ТА ГЕО =================
 
-async def get_coords_online(place_name):
-    query = f"{place_name}, Харківська область, Україна"
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": query, "format": "json", "limit": 1}
-    headers = {"User-Agent": "NeptunBot/1.0"}
+async def get_coords(city):
+    url = f"https://nominatim.openstreetmap.org/search?q={city},Харківська область&format=json&limit=1"
+    headers = {"User-Agent": "TacticalMonitor/1.0"}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data:
-                        res = data[0]
-                        return [float(res["lat"]), float(res["lon"]), res["display_name"].split(',')[0]]
-    except: pass
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=10) as resp:
+                data = await resp.json()
+                if data:
+                    return [float(data[0]['lat']), float(data[0]['lon']), data[0]['display_name'].split(',')[0]]
+    except: return None
     return None
 
-@client.on(events.NewMessage)
-async def handle_channel(event):
-    if event.chat and getattr(event.chat, 'username', '') == CHANNEL_ID:
-        raw_text = event.raw_text
-        # Визначаємо локацію
-        clean = re.sub(r'(🚨|⚠️|Увага|БПЛА|Тип)', '', raw_text).strip()
-        target_name = clean.split('\n')[0].split(' ')[0] # Спрощено для прикладу
-        
-        found_point = await get_coords_online(target_name)
-        if not found_point: return
+# ================= ОБРОБНИК ПОВІДОМЛЕНЬ =================
 
-        # Визначаємо тип
-        final_type = "unknown"
-        if "ппо" in raw_text.lower(): final_type = "air_defense"
-        elif "шахед" in raw_text.lower() or "мопед" in raw_text.lower(): final_type = "drone"
-        elif "ракета" in raw_text.lower(): final_type = "missile"
+@client.on(events.NewMessage(chats=CHANNEL_ID))
+async def channel_listener(event):
+    text = event.raw_text.lower()
+    
+    # 1. Пошук міста
+    city_match = re.search(r'(?:у|в|біля|через|на)\s+([а-яА-Яіїєґ]{3,})', text)
+    if not city_match: return
+    city_name = city_match.group(1)
+    
+    geo = await get_coords(city_name)
+    if not geo: return
 
-        # Визначаємо напрямок
-        direction = None
-        for key, deg in DIRECTION_MAP.items():
-            if key in raw_text.lower():
-                direction = deg
+    # 2. Визначення типу
+    final_type = "unknown"
+    types_db = load_db('types.json')
+    
+    if any(x in text for x in ["ппо", "працює"]): final_type = "air_defense"
+    else:
+        for t_type, keywords in types_db.items():
+            if any(k in text for k in keywords):
+                final_type = t_type
                 break
 
-        new_target = {
-            "id": event.id, "type": final_type, "count": 1,
-            "status": "active", "lat": found_point[0], "lng": found_point[1],
-            "direction": direction,
-            "label": f"{found_point[2]}",
-            "time": datetime.now().strftime("%H:%M"),
-            "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
-        }
-        
-        data = db('targets.json')
-        data = [t for t in data if t['id'] != event.id]
-        data.append(new_target)
-        db('targets.json', data)
+    # 3. Напрямок (курс)
+    direction = None
+    direction_map = {
+        "пн": 0, "північ": 0, "пн-сх": 45, "сх": 90, "схід": 90,
+        "пд-сх": 135, "пд": 180, "південь": 180, "пд-зх": 225,
+        "зх": 270, "захід": 270, "пн-зх": 315
+    }
+    for k, v in direction_map.items():
+        if k in text:
+            direction = v; break
+
+    # 4. Створення об'єкта (TTL 5 хвилин)
+    now = datetime.now()
+    new_target = {
+        "id": event.id,
+        "type": final_type,
+        "lat": geo[0],
+        "lng": geo[1],
+        "direction": direction,
+        "label": f"{SYMBOLS.get(final_type, '❓')} | {geo[2].upper()}",
+        "time": now.strftime("%H:%M"),
+        "expire_at": (now + timedelta(minutes=5)).isoformat() # ВИДАЛЕННЯ ЧЕРЕЗ 5 ХВ
+    }
+
+    # 5. Оновлення бази
+    targets = load_db('targets.json')
+    targets = [t for t in targets if t['id'] != event.id]
+    targets.append(new_target)
+    save_db('targets.json', targets)
+    
+    logger.info(f"🎯 Нова ціль: {city_name} ({final_type})")
+
+# ================= ЗАПУСК =================
 
 async def main():
+    logger.info("📡 Запуск тактичного парсера...")
     await client.start(bot_token=BOT_TOKEN)
-    asyncio.create_task(auto_cleanup())
+    
+    # Запуск фонового завдання очищення
+    asyncio.create_task(auto_cleanup_task())
+    
+    logger.info("🚀 Бот активний. Очікування повідомлень...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
