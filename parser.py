@@ -10,87 +10,129 @@ from datetime import datetime, timedelta
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 
-# Настройка логов
+# Налаштування логів
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("NEPTUN_GEO_SYSTEM")
+logger = logging.getLogger("NEPTUN_CORE")
 
-# ================= КОНФИГУРАЦИЯ =================
+# ================= КОНФІГУРАЦІЯ =================
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "") 
 ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i.strip().isdigit()]
 
 MY_CHANNEL = 'monitorkh1654' 
-SOURCE_CHANNELS = ['monitor1654', 'tlknewsua', 'radar_kharkov']
+SOURCE_CHANNELS = ['monitor_ukraine', 'povitryany_trivogi', 'kharkiv_life', 'eRadar_ua']
 
-# Базовые фильтры (на всякий случай)
-BASE_KEYWORDS = ["харків", "область", "ппо", "вибух"]
+# Словник символів для карти
+SYMBOLS = {
+    "air_defense": "💥 ППО", "drone": "🛵 Мопед", "missile": "🚀 Ракета",
+    "kab": "☄️ КАБ", "mrls": "🔥 РСЗВ", "recon": "🛸 Розвідка",
+    "aircraft": "✈️ Авіація", "unknown": "❓ Невідомо"
+}
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 db_lock = threading.Lock()
 
-# ================= ГЕО-ЛОГИКА (ОБЩАЯ) =================
+# ================= ГЕО-ФУНКЦІЇ =================
 
 def clean_location_name(text):
-    """Та же логика, что и в парсере: вытягиваем только потенциальное место."""
-    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення)', '', text, flags=re.IGNORECASE).strip()
-    parts = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз)', clean, flags=re.IGNORECASE)
-    name = parts[0].strip()
-    # Убираем типы угроз для гео-проверки
-    loc_only = re.sub(r'(бпла|ракета|каб|шахед|мопед|авіація|ппо)', '', name, flags=re.IGNORECASE).strip()
-    return loc_only if len(loc_only) > 2 else None
+    """Витягує локацію, ігноруючи типи загроз та емодзі."""
+    # Очищення від службових символів
+    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення|БПЛА|Ракета|КАБ|Шахед|Мопед)', '', text, flags=re.IGNORECASE).strip()
+    # Пошук основного населеного пункту до напрямку руху
+    parts = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз|біля)', clean, flags=re.IGNORECASE)
+    name = parts[0].strip().replace('"', '').replace('«', '').replace('»', '')
+    return name if len(name) > 2 else None
 
-async def check_location_exists(place_name):
-    """Проверяет, реально ли это населенный пункт в области."""
+async def get_coords(place):
+    """Отримує координати через OpenStreetMap (Nominatim)."""
     url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": f"{place_name}, Харківська область", "format": "json", "limit": 1}
+    params = {"q": f"{place}, Харківська область, Україна", "format": "json", "limit": 1}
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers={"User-Agent":"NeptunChecker"}) as resp:
+            async with session.get(url, params=params, headers={"User-Agent":"NeptunMapBot"}) as resp:
                 data = await resp.json()
-                return data[0] if data else None
+                if data:
+                    return [float(data[0]["lat"]), float(data[0]["lon"]), data[0]["display_name"].split(',')[0]]
     except: return None
 
-# ================= РЕТРАНСЛЯТОР С ГЕОБАЗОЙ =================
+# ================= ЛОГІКА РЕТРАНСЛЯТОРА =================
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
-async def retranslator_with_geo(event):
-    text_lc = event.raw_text.lower()
+async def retranslator_handler(event):
+    """Фільтрує чужі канали та пересилає тільки Харківську область."""
+    raw_text = event.raw_text
+    loc_candidate = clean_location_name(raw_text)
     
-    # 1. Сначала быстрая проверка на базовые слова
-    has_base_word = any(word in text_lc for word in BASE_KEYWORDS)
+    # Перевіряємо, чи є в тексті пряма згадка області або знайдена валідна локація
+    is_kharkiv = any(word in raw_text.lower() for word in ["харків", "область", "хнс", "хнр"])
     
-    # 2. Извлекаем локацию
-    potential_loc = clean_location_name(event.raw_text)
-    
-    location_data = None
-    if potential_loc:
-        location_data = await check_location_exists(potential_loc)
-    
-    # Условие пересылки: либо есть базовое слово (Харьков/ППО), либо найдена реальная локация в области
-    if has_base_word or location_data:
+    if is_kharkiv or (loc_candidate and await get_coords(loc_candidate)):
         try:
-            # Если найдена локация, можем даже добавить пометку для себя в логи
-            loc_tag = f" [{potential_loc}]" if location_data else ""
             await client.send_message(MY_CHANNEL, event.message)
-            logger.info(f"✅ Гео-фильтр пройден: {event.chat.username}{loc_tag}")
+            logger.info(f"♻️ Ретрансляція: {loc_candidate if loc_candidate else 'Харків'}")
         except Exception as e:
-            logger.error(f"Ошибка пересылки: {e}")
+            logger.error(f"Помилка ретрансляції: {e}")
 
-# ================= ПАРСЕР (БЕЗ ИЗМЕНЕНИЙ) =================
+# ================= ЛОГІКА ПАРСЕРА =================
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
-async def parser_logic(event):
-    # Тут остается твой старый код парсера, который записывает в targets.json
-    # Он сработает сразу после того, как реtranslator перешлет сообщение
-    logger.info("📍 Парсер подхватил сообщение и обновляет targets.json")
-    # ... (код парсера из предыдущих ответов) ...
+async def parser_handler(event):
+    """Парсить повідомлення у твоєму каналі та оновлює targets.json."""
+    raw_text = event.raw_text
+    loc_name = clean_location_name(raw_text)
+    if not loc_name: return
 
-# ================= ЗАПУСК =================
+    coords = await get_coords(loc_name)
+    if not coords: return
+
+    # Визначення типу загрози
+    types_db = db('types.json')
+    text_lc = raw_text.lower()
+    found_type = "unknown"
+    for t_type, keywords in types_db.items():
+        if any(word in text_lc for word in keywords):
+            found_type = t_type; break
+
+    # Створення об'єкта для мапи
+    new_target = {
+        "id": event.id,
+        "type": found_type,
+        "count": 1,
+        "status": "active",
+        "lat": coords[0],
+        "lng": coords[1],
+        "label": f"{SYMBOLS.get(found_type, '❓')} | {coords[2]}",
+        "time": datetime.now().strftime("%H:%M"),
+        "expire_at": (datetime.now() + timedelta(minutes=40)).isoformat()
+    }
+
+    # Збереження та пуш
+    targets = db('targets.json')
+    targets = [t for t in targets if t['id'] != event.id]
+    targets.append(new_target)
+    db('targets.json', targets)
+    logger.info(f"📍 Мапа оновлена: {coords[2]}")
+
+# ================= СИСТЕМНІ ФУНКЦІЇ =================
+
+def db(file, data=None):
+    with db_lock:
+        if data is None:
+            if not os.path.exists(file): return [] if file == 'targets.json' else {}
+            with open(file, 'r', encoding='utf-8') as f: return json.load(f)
+        else:
+            with open(file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            try:
+                subprocess.run(["git", "add", file], check=False)
+                subprocess.run(["git", "commit", "-m", "📡 Tactical Sync", "--no-verify"], check=False)
+                subprocess.run(["git", "push"], check=False)
+            except: pass
 
 async def main():
     await client.start()
-    print("🚀 Neptun System v4.0 Online (Retranslator + GeoBase + Parser)")
+    print("✅ СИСТЕМА NEPTUN ЗАПУЩЕНА")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
