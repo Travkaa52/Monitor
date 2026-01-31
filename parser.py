@@ -21,7 +21,7 @@ SESSION_STRING = os.getenv("SESSION_STRING", "")
 ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i.strip().isdigit()]
 
 MY_CHANNEL = 'monitorkh1654' 
-SOURCE_CHANNELS = ['monitor_ukraine', 'povitryany_trivogi', 'kharkiv_life', 'eRadar_ua']
+SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
 
 # Словник символів для карти
 SYMBOLS = {
@@ -137,3 +137,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
