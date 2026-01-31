@@ -43,10 +43,10 @@
             background-size: 100% 3px, 3px 100%;
             z-index: 5000;
             pointer-events: none;
-            opacity: 0.3;
+            opacity: 0.2;
         }
 
-        #map { position: absolute; inset: 0; z-index: 1; background: #000; filter: contrast(1.1) brightness(0.9) sepia(0.1); }
+        #map { position: absolute; inset: 0; z-index: 1; background: #000; filter: contrast(1.1) brightness(0.9); }
 
         /* HUD Елементи */
         .top-hud {
@@ -74,21 +74,6 @@
             cursor: pointer;
         }
 
-        /* Маркери */
-        .target-icon {
-            filter: drop-shadow(0 0 5px rgba(255, 157, 0, 0.5));
-            transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .user-arrow {
-            width: 0; height: 0;
-            border-left: 10px solid transparent;
-            border-right: 10px solid transparent;
-            border-bottom: 18px solid var(--ally);
-            filter: drop-shadow(0 0 8px var(--ally));
-        }
-
-        /* Список цілей */
         .drawer {
             position: fixed; bottom: 0; left: 0; right: 0; height: 60vh;
             background: var(--army-bg); z-index: 2100;
@@ -106,7 +91,6 @@
             display: flex; justify-content: space-between; align-items: center;
         }
 
-        /* Кнопки керування */
         .bottom-controls {
             position: absolute; bottom: 0; left: 0; right: 0; z-index: 2000;
             background: rgba(13, 14, 10, 0.95);
@@ -120,7 +104,13 @@
             color: var(--khaki); padding: 12px 2px; font-size: 8px; font-weight: 800;
             cursor: pointer;
         }
-        .control-btn:active { background: var(--hazard); color: #000; }
+        .user-arrow {
+            width: 0; height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 15px solid var(--ally);
+            filter: drop-shadow(0 0 5px var(--ally));
+        }
     </style>
 </head>
 <body>
@@ -131,7 +121,7 @@
         <div class="hud-row">
             <div class="status-box">
                 <div style="display: flex; justify-content: space-between;">
-                    <span style="letter-spacing: 2px;">● СИСТЕМА НЕПТУН</span>
+                    <span style="letter-spacing: 2px;">● NEPTUN SYSTEM</span>
                     <span id="sys-time" style="color:var(--hazard);">00:00:00</span>
                 </div>
                 <div style="margin-top: 5px; display: flex; gap: 10px; font-size: 8px;">
@@ -142,7 +132,7 @@
         </div>
         <div class="hud-row">
             <button class="top-btn" onclick="toggleLayers()">ЗМІНИТИ ШАР</button>
-            <button class="top-btn" onclick="window.open('https://t.me/monitorkh1654')">ТЕЛЕГРАМ КАНАЛ</button>
+            <button class="top-btn" onclick="window.open('https://t.me/monitorkh1654')">TG КАНАЛ</button>
         </div>
     </div>
 
@@ -163,9 +153,13 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const DATA_URL = 'targets.json';
-        const ICONS_PATH = 'img/'; // Переконайся, що іконки лежать тут
+        const TARGETS_URL = 'targets.json';
+        const ALERTS_URL = 'alerts.json';
+        const GEO_URL = 'kharkiv_districts.geojson';
+        const ICONS_PATH = 'img/';
+        
         let map, targets = new Map(), userMarker = null, userPos = null;
+        let districtLayer = null, geoData = null;
 
         const baseLayers = {
             dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'),
@@ -173,109 +167,125 @@
         };
         let currentLayer = 'dark';
 
-        function init() {
-            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 10);
+        async function init() {
+            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 9);
             baseLayers.dark.addTo(map);
 
-            // Слідкування за юзером
+            // GPS Локація
             map.locate({watch: true, enableHighAccuracy: true});
             map.on('locationfound', (e) => {
                 userPos = e.latlng;
                 if (!userMarker) {
                     userMarker = L.marker(e.latlng, {
-                        icon: L.divIcon({className: 'user-loc', html: '<div class="user-arrow"></div>', iconSize: [20, 20]})
+                        icon: L.divIcon({className: 'user-loc', html: '<div class="user-arrow"></div>', iconSize: [16, 16]})
                     }).addTo(map);
                 } else {
                     userMarker.setLatLng(e.latlng);
                 }
             });
 
-            syncData();
-            setInterval(syncData, 5000); // Оновлення кожні 5 сек
+            // Завантаження GeoJSON один раз
+            try {
+                const gRes = await fetch(GEO_URL);
+                geoData = await gRes.json();
+            } catch(e) { console.error("GeoJSON missing"); }
+
+            updateLoop();
+            setInterval(updateLoop, 10000); // Оновлення раз на 10 сек
+            
             setInterval(() => {
                 document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA');
             }, 1000);
         }
 
-        async function syncData() {
+        async function updateLoop() {
+            await syncAlerts();
+            await syncTargets();
+        }
+
+        async function syncAlerts() {
+            if (!geoData) return;
             try {
-                const res = await fetch(`${DATA_URL}?nocache=${Date.now()}`);
+                const res = await fetch(`${ALERTS_URL}?v=${Date.now()}`);
+                const alerts = await res.json();
+
+                if (districtLayer) map.removeLayer(districtLayer);
+
+                districtLayer = L.geoJson(geoData, {
+                    style: (feature) => {
+                        const name = feature.properties.name_en;
+                        const active = alerts[name] && alerts[name].active;
+                        return {
+                            fillColor: active ? "var(--danger)" : "transparent",
+                            fillOpacity: active ? 0.35 : 0,
+                            color: "var(--multicam-dark)",
+                            weight: 1
+                        };
+                    }
+                }).addTo(map);
+            } catch(e) { console.warn("Alerts sync failed"); }
+        }
+
+        async function syncTargets() {
+            try {
+                const res = await fetch(`${TARGETS_URL}?v=${Date.now()}`);
                 const data = await res.json();
-                updateMarkers(data);
+                
+                const activeIds = new Set();
+                data.forEach(obj => {
+                    const id = String(obj.id);
+                    activeIds.add(id);
+
+                    const icon = L.divIcon({
+                        className: 'target-marker',
+                        html: `<div style="position:relative;">
+                                 <div style="background:red; width:8px; height:8px; border-radius:50%; position:absolute; top:11px; left:11px; box-shadow:0 0 10px red;"></div>
+                                 <img src="${ICONS_PATH}${obj.type}.png" style="width:30px; height:30px;" onerror="this.style.opacity='0'">
+                               </div>`,
+                        iconSize: [30, 30], iconAnchor: [15, 15]
+                    });
+
+                    if (targets.has(id)) {
+                        targets.get(id).marker.setLatLng([obj.lat, obj.lng]).setIcon(icon);
+                    } else {
+                        const marker = L.marker([obj.lat, obj.lng], { icon }).addTo(map);
+                        targets.set(id, { marker, data: obj });
+                    }
+                });
+
+                targets.forEach((val, id) => {
+                    if (!activeIds.has(id)) {
+                        map.removeLayer(val.marker);
+                        targets.delete(id);
+                    }
+                });
+
+                document.getElementById('targetCount').innerText = targets.size;
                 document.getElementById('conn-status').innerText = 'OK';
                 document.getElementById('conn-status').style.color = 'var(--ally)';
-            } catch (e) {
+                updateUIList();
+            } catch(e) { 
                 document.getElementById('conn-status').innerText = 'ERR';
                 document.getElementById('conn-status').style.color = 'var(--danger)';
             }
         }
 
-        function updateMarkers(data) {
-            const activeIds = new Set();
-            const now = new Date();
-
-            data.forEach(obj => {
-                // Видаляємо старі цілі (якщо expire_at менше поточного часу)
-                if (obj.expire_at && new Date(obj.expire_at) < now) return;
-
-                const id = String(obj.id);
-                activeIds.add(id);
-
-                // Напрямок (якщо є в targets.json)
-                const rotate = obj.direction ? `transform: rotate(${obj.direction}deg);` : '';
-                const icon = L.divIcon({
-                    className: 'target-icon',
-                    html: `<img src="${ICONS_PATH}${obj.type}.png" style="width:30px; height:30px; ${rotate}">`,
-                    iconSize: [30, 30],
-                    iconAnchor: [15, 15]
-                });
-
-                if (targets.has(id)) {
-                    targets.get(id).marker.setLatLng([obj.lat, obj.lng]).setIcon(icon);
-                } else {
-                    const marker = L.marker([obj.lat, obj.lng], { icon }).addTo(map);
-                    // Ефект "виявлення" для нової цілі
-                    const circle = L.circle([obj.lat, obj.lng], {radius: 500, color: 'red', weight: 1}).addTo(map);
-                    setTimeout(() => map.removeLayer(circle), 5000);
-                    
-                    targets.set(id, { marker, data: obj });
-                }
-            });
-
-            // Очищення видалених цілей
-            targets.forEach((val, id) => {
-                if (!activeIds.has(id)) {
-                    map.removeLayer(val.marker);
-                    targets.delete(id);
-                }
-            });
-
-            document.getElementById('targetCount').innerText = targets.size;
-            updateUIList();
-        }
-
         function updateUIList() {
             const list = document.getElementById('targetsList');
-            const items = Array.from(targets.values()).map(t => {
+            list.innerHTML = Array.from(targets.values()).map(t => {
                 let dist = userPos ? (map.distance(userPos, t.marker.getLatLng()) / 1000).toFixed(1) : '?';
-                return `
-                    <div class="target-item" onclick="focusTarget(${t.data.lat}, ${t.data.lng})">
-                        <div>
-                            <div style="font-size:12px; font-weight:bold;">${t.data.label}</div>
-                            <div style="font-size:9px; opacity:0.6;">${t.data.time} | ${t.data.type}</div>
-                        </div>
-                        <div style="color:var(--hazard); font-weight:bold;">${dist} KM</div>
-                    </div>
-                `;
-            }).join('');
-            list.innerHTML = items || '<div style="text-align:center; opacity:0.5;">ЦІЛЕЙ НЕ ВИЯВЛЕНО</div>';
+                return `<div class="target-item" onclick="focusTarget(${t.data.lat}, ${t.data.lng})">
+                            <div>
+                                <div style="font-size:12px; font-weight:bold; color:white;">${t.data.label}</div>
+                                <div style="font-size:9px; opacity:0.6;">${t.data.time} | TYPE: ${t.data.type}</div>
+                            </div>
+                            <div style="color:var(--hazard); font-weight:bold;">${dist} KM</div>
+                        </div>`;
+            }).join('') || '<div style="text-align:center; opacity:0.5;">ЧИСТЕ НЕБО</div>';
         }
 
-        function focusTarget(lat, lng) { map.flyTo([lat, lng], 14); toggleDrawer(); }
-        function centerMap() { if (targets.size > 0) { 
-            const bounds = L.featureGroup(Array.from(targets.values()).map(t => t.marker)).getBounds();
-            map.fitBounds(bounds.pad(0.2)); 
-        }}
+        function focusTarget(lat, lng) { map.flyTo([lat, lng], 13); toggleDrawer(); }
+        function centerMap() { map.setView([49.99, 36.23], 10); }
         function useGPS() { if (userPos) map.flyTo(userPos, 13); }
         function toggleDrawer() { document.getElementById('listDrawer').classList.toggle('open'); }
         function toggleLayers() {
