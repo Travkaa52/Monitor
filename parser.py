@@ -23,7 +23,7 @@ ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i
 
 # Каналы
 MY_CHANNEL = 'monitorkh1654' # Твой канал
-SOURCE_CHANNELS = ['monitor_ukraine', 'povitryany_trivogi', 'kharkiv_life'] # Откуда берем инфо
+SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'radar_kharkov'] # Откуда берем инфо
 
 # Ключевые слова для ретранслятора (чтобы не спамить лишним)
 FILTER_WORDS = ["харків", "область", "чугуїв", "куп'янськ", "вовчанськ", "дергачі", "люботин"]
@@ -145,3 +145,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
