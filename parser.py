@@ -29,8 +29,8 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 db_lock = threading.Lock()
 
 SYMBOLS = {
-    "air_defense": "💥 ППО", "drone": "🛵 Мопед", "missile": "🚀 Ракета",
-    "kab": "☄️ КАБ", "mrls": "🔥 РСЗВ", "recon": "🛸 Розвідка",
+    "air_defense": "💥Робота ППО", "drone": "БПЛА типу Шахед/Гербера", "missile": "🚀 Ракета",
+    "kab": "☄️Загроза КАБ", "mrls": "🔥 Загроза РСЗВ", "recon": "🛸 БПЛА типу Розвідник",
     "aircraft": "✈️ Авіація", "unknown": "❓ Невідомо"
 }
 
@@ -158,3 +158,4 @@ async def main():
 if __name__ == '__main__':
     asyncio.run(main())
     
+
