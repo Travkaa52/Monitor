@@ -3,139 +3,114 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>ТАКТИЧНИЙ МОНІТОР v3.6</title>
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>TACTICAL MONITOR v4.2 PRO</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-    <link rel="manifest" href="manifest.json">
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
     <style>
-        body { font-family: 'JetBrains Mono', monospace; background-color: #060705; overflow: hidden; }
-        .page { position: absolute; inset: 0; visibility: hidden; opacity: 0; }
-        .page.active { visibility: visible; opacity: 1; }
-        #map { filter: brightness(0.6) contrast(1.2) saturate(0.5) hue-rotate(130deg); }
-        .glass { background: rgba(15, 17, 12, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(74, 85, 43, 0.4); }
-        .hud-border { border-left: 3px solid #f97316; }
+        body { font-family: 'JetBrains Mono', monospace; background-color: #060705; color: #d6d3d1; overflow: hidden; }
+        .page { position: absolute; inset: 0; display: none; flex-direction: column; }
+        .page.active { display: flex; }
+        #map { filter: brightness(0.7) contrast(1.2) saturate(0.8) hue-rotate(130deg); flex-grow: 1; }
+        .glass { background: rgba(15, 17, 12, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(249, 115, 22, 0.2); }
+        .hud-border { border-left: 4px solid #f97316; }
         
-        /* Панель шарів */
-        .leaflet-control-layers {
-            background: rgba(28, 25, 23, 0.8) !important;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(249, 115, 22, 0.3) !important;
-            color: #f97316 !important;
-            border-radius: 8px !important;
-            font-family: monospace;
-            font-size: 11px;
-            margin-top: 80px !important; 
-            margin-right: 12px !important; 
+        @keyframes threat-distort {
+            0% { transform: scale(1); filter: drop-shadow(0 0 2px red); }
+            50% { transform: scale(1.1); filter: drop-shadow(0 0 10px red); }
+            100% { transform: scale(1); filter: drop-shadow(0 0 2px red); }
         }
-        .leaflet-control-layers-toggle { filter: invert(1) hue-rotate(180deg); }
-    </style>        
+        .threat-pulse { animation: threat-distort 1.5s infinite ease-in-out; }
+    </style>
 </head>
-<body class="text-stone-300">
+<body>
 
-    <div class="fixed inset-0 pointer-events-none z-[9999] opacity-[0.03] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]"></div>
-
-    <nav class="fixed bottom-0 left-0 right-0 glass z-[5000] flex justify-around items-center h-20 pb-safe">
-        <button onclick="router.go('map')" class="nav-btn flex flex-col items-center gap-1" id="nav-map">
+    <nav class="fixed bottom-0 left-0 right-0 glass z-[5000] flex justify-around items-center h-20 pb-safe border-t border-orange-500/20">
+        <button id="nav-map" onclick="Router.go('map')" class="nav-btn flex flex-col items-center gap-1 text-orange-500">
             <div class="w-6 h-6 bg-current" style="mask: url('https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/map.svg') no-repeat center;"></div>
             <span class="text-[9px] font-bold uppercase">Карта</span>
         </button>
-        <button onclick="router.go('targets')" class="nav-btn flex flex-col items-center gap-1 opacity-50" id="nav-targets">
+        <button id="nav-targets" onclick="Router.go('targets')" class="nav-btn flex flex-col items-center gap-1 opacity-50">
             <div class="w-6 h-6 bg-current" style="mask: url('https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/crosshair.svg') no-repeat center;"></div>
             <span class="text-[9px] font-bold uppercase">Цілі</span>
         </button>
-        <button onclick="router.go('logs')" class="nav-btn flex flex-col items-center gap-1 opacity-50" id="nav-logs">
+        <button id="nav-logs" onclick="Router.go('logs')" class="nav-btn flex flex-col items-center gap-1 opacity-50">
             <div class="w-6 h-6 bg-current" style="mask: url('https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/list-ordered.svg') no-repeat center;"></div>
             <span class="text-[9px] font-bold uppercase">Логи</span>
         </button>
-        <button onclick="router.go('settings')" class="nav-btn flex flex-col items-center gap-1 opacity-50" id="nav-settings">
+        <button id="nav-settings" onclick="Router.go('settings')" class="nav-btn flex flex-col items-center gap-1 opacity-50">
             <div class="w-6 h-6 bg-current" style="mask: url('https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/shield.svg') no-repeat center;"></div>
             <span class="text-[9px] font-bold uppercase">Система</span>
         </button>
     </nav>
 
     <section id="page-map" class="page active">
-        <div id="map" class="w-full h-full"></div>
-
-        <div class="absolute top-[80px] left-3 z-[1001]">
-            <a href="https://send.monobank.ua/jar/6R3gd9Ew8w" target="_blank" 
-               class="glass w-11 h-11 flex items-center justify-center rounded-lg border-orange-500/50 hover:bg-orange-500/20 transition-all active:scale-90 shadow-lg group">
-                <div class="w-6 h-6 bg-orange-500 group-hover:bg-orange-400" 
-                     style="mask: url('https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/heart.svg') no-repeat center; mask-size: contain;">
-                </div>
-            </a>
-        </div>
-
+        <div id="map"></div>
         <div class="absolute top-4 left-4 right-4 z-[1001] pointer-events-none">
             <div class="glass p-4 hud-border pointer-events-auto flex justify-between items-center">
                 <div>
-                    <h1 class="text-xs font-bold text-orange-500 tracking-widest uppercase">Tactical_Monitor_v3.6</h1>
-                    <p class="text-[9px] opacity-60 uppercase">Статус: <span id="sync-status" class="text-green-500">Online</span></p>
+                    <h1 class="text-[10px] font-bold text-orange-500 tracking-tighter uppercase">NEPTUN_MONITOR_v4.2</h1>
+                    <p class="text-[9px] opacity-60 uppercase">Link: <span id="sync-status" class="text-green-500">Syncing...</span></p>
                 </div>
                 <div class="text-right">
-                    <p id="clock" class="text-lg font-bold leading-none">00:00:00</p>
-                    <p class="text-[9px] opacity-60 text-orange-400 uppercase">Об'єктів: <span id="obj-count">0</span></p>
+                    <p id="clock" class="text-lg font-bold leading-none tabular-nums">00:00:00</p>
+                    <p class="text-[9px] opacity-60 text-orange-400 uppercase">Цілі: <span id="obj-count">0</span></p>
                 </div>
             </div>
         </div>
     </section>
 
     <section id="page-targets" class="page bg-[#060705]">
-        <header class="p-6 pt-16 border-b border-orange-500/20">
-            <h2 class="text-xl font-black italic tracking-tighter text-orange-500 uppercase">Активні_загрози</h2>
+        <header class="p-6 pt-12 border-b border-orange-500/20">
+            <h2 class="text-xl font-black italic tracking-tighter text-orange-500 uppercase">Список_загроз</h2>
         </header>
-        <div id="targets-container" class="p-4 space-y-3 overflow-y-auto h-[calc(100vh-160px)]"></div>
+        <div id="targets-container" class="p-4 space-y-3 overflow-y-auto pb-24">
+            </div>
     </section>
 
     <section id="page-logs" class="page bg-[#060705]">
-        <header class="p-6 pt-16 border-b border-white/10">
-            <h2 class="text-xl font-black italic uppercase">Журнал_подій</h2>
+        <header class="p-6 pt-12 border-b border-white/10">
+            <h2 class="text-xl font-black italic uppercase text-stone-400">Стрічка_подій</h2>
         </header>
-        <div id="logs-container" class="p-4 space-y-2 text-[10px] font-mono"></div>
+        <div id="logs-container" class="p-4 space-y-2 text-[10px] font-mono pb-24"></div>
     </section>
 
     <section id="page-settings" class="page bg-[#060705]">
-        <header class="p-6 pt-16 border-b border-white/10">
-            <h2 class="text-xl font-black italic uppercase">Конфігурація</h2>
+        <header class="p-6 pt-12 border-b border-white/10">
+            <h2 class="text-xl font-black italic uppercase text-stone-400">Конфігурація</h2>
         </header>
-        <div class="p-6 space-y-4">
+        <div class="p-6 space-y-6">
             <div class="glass p-4 flex justify-between items-center">
-                <span class="text-sm">Сповіщення про загрози</span>
-                <div id="toggle-missile" onclick="ui.toggleSetting('missileAlerts')" class="w-10 h-5 bg-stone-800 rounded-full flex items-center px-1 cursor-pointer transition-all">
-                    <div class="w-3 h-3 bg-white rounded-full transition-all"></div>
-                </div>
+                <span class="text-sm uppercase font-bold">Сповіщення</span>
+                <button id="toggle-missile" onclick="UIManager.toggleSetting('missileAlerts')" class="w-12 h-6 bg-stone-800 rounded-full relative transition-colors">
+                    <div class="w-4 h-4 bg-white rounded-full absolute top-1 left-1 transition-transform"></div>
+                </button>
             </div>
-            
             <div class="glass p-4 flex justify-between items-center">
-                <span class="text-sm">Авто-фокус на ціль</span>
-                <div id="toggle-focus" onclick="ui.toggleSetting('autoFocus')" class="w-10 h-5 bg-stone-800 rounded-full flex items-center px-1 cursor-pointer transition-all">
-                    <div class="w-3 h-3 bg-white rounded-full transition-all"></div>
-                </div>
+                <span class="text-sm uppercase font-bold">Автофокус</span>
+                <button id="toggle-focus" onclick="UIManager.toggleSetting('autoFocus')" class="w-12 h-6 bg-stone-800 rounded-full relative transition-colors">
+                    <div class="w-4 h-4 bg-white rounded-full absolute top-1 left-1 transition-transform"></div>
+                </button>
             </div>
-
-            <div class="glass p-4 space-y-4">
+            <div class="glass p-4 space-y-2">
                 <div class="flex justify-between items-center">
-                    <span class="text-sm font-bold">Радіус (км)</span>
-                    <input type="number" id="alert-radius" class="w-20 bg-stone-800 border border-orange-500 text-orange-500 text-center rounded p-1">
+                    <span class="text-sm uppercase font-bold text-orange-500">Радіус загроз</span>
+                    <input type="number" id="alert-radius" onchange="UIManager.updateRadius(this.value)" class="w-16 bg-black border border-orange-500/40 text-orange-500 text-center rounded p-1 text-xs">
                 </div>
-                <p class="text-[10px] opacity-60 italic">Сповіщення при наближенні об'єкта в цю зону.</p>
             </div>
-
-            <button onclick="location.reload()" class="w-full bg-orange-900/20 border border-orange-500 p-4 text-orange-500 font-bold text-xs uppercase tracking-widest">Перезавантажити систему</button>
+            <button onclick="location.reload()" class="w-full bg-orange-600/10 border border-orange-500 text-orange-500 py-4 text-[10px] font-bold uppercase tracking-[0.2em] hover:bg-orange-600/20">
+                Перезавантажити Ядро
+            </button>
         </div>
     </section>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="app.js"></script>
-
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js').catch(err => console.log('SW Failed', err));
-        });
-      }
-    </script>
 </body>
 </html>
