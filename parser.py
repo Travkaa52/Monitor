@@ -37,7 +37,7 @@ SYMBOLS = {
     "air_defense": "🛡️ ППО", "drone": "🛵 Мопед", "missile": "🚀 Ракета",
     "kab": "☄️ КАБ", "mrls": "🔥 РСЗВ", "recon": "🛸 Розвідка",
     "aircraft": "✈️ Авіація", "artillery": "💥 Арта", "s300": "🚜 С-300",
-    "unknown": "❓ Невідомо"
+    "molniya": "⚡ Молнія", "unknown": "❓ Невідомо"
 }
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -59,16 +59,17 @@ def db(file, data=None):
                 subprocess.run(["git", "add", file], check=False)
                 subprocess.run(["git", "commit", "-m", f"📡 Sync {file}"], check=False)
                 subprocess.run(["git", "push"], check=False)
-            except: pass
+            except Exception as e:
+                logger.error(f"Git Error: {e}")
 
 # ================= ГЕО ТА ПАРСИНГ =================
 
 def clean_location_name(text):
-    """Стара логіка очищення з покращеним пошуком локації"""
-    # Видаляємо службові слова
-    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення|БПЛА|Ракета|КАБ|Шахед|Мопед|розвідувальні|1|2|3|біля)', '', text, flags=re.IGNORECASE).strip()
-    # Витягуємо назву до першого роздільника або ключового слова курсу
-    parts = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз|біля)', clean, flags=re.IGNORECASE)
+    """Очищення тексту для пошуку координат"""
+    # Видаляємо службові слова, включаючи кількість та нові типи БПЛА
+    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення|БПЛА|Ракета|КАБ|Шахед|Мопед|розвідувальні|молнія|гербера|1|2|3|біля|в області)', '', text, flags=re.IGNORECASE).strip()
+    # Витягуємо назву до першого роздільника
+    parts = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз|біля|район)', clean, flags=re.IGNORECASE)
     name = parts[0].strip().replace('"', '').replace('«', '').replace('»', '').replace(':', '')
     return name if len(name) > 2 else None
 
@@ -88,15 +89,15 @@ async def get_coords(place):
 def get_threat_type(text_lc):
     """Визначає тип загрози за ключовими словами"""
     mapping = {
-        "drone": ["шахед", "мопед", "shahed","гербера", ""],
+        "drone": ["шахед", "мопед", "shahed", "гербера"],
         "missile": ["ракета", "крилата", "балістика"],
         "kab": ["каб", "авіабомб", "фаб"],
-        "recon": ["розвідник", "розвідувальні бпла", "Развед.БпЛА", "supercam", "zala"],
-        "mrls": ["рсзо", "град", "ураган", "смерч"],
+        "recon": ["розвідник", "розвідувальні", "развед.БпЛА", "supercam", "zala", "орлан"],
+        "mrls": ["рсзо", "рсзв", "град", "ураган", "смерч"],
         "s300": ["с300", "с-300"],
         "artillery": ["арта", "артилерія", "вихід", "обстріл"],
-        "aircraft": ["міг", "су-", "авіація", "борт"]
-        "molniya": ["Молния", "БПЛА типу "Молнія"]
+        "aircraft": ["міг", "су-", "авіація", "борт"],
+        "molniya": ["молния", "молнія"]
     }
     for t_type, keys in mapping.items():
         if any(k in text_lc for k in keys):
@@ -109,11 +110,12 @@ def get_threat_type(text_lc):
 async def retranslator_handler(event):
     if not event.raw_text: return
     text_lc = event.raw_text.lower()
-    is_kharkiv = any(word in text_lc for word in ["харків", "область", "хнс", "чугуїв", "куп", "люботин", "богодухів", "дергачі"])
+    # Розширений список міст для фільтрації
+    is_kharkiv = any(word in text_lc for word in ["харків", "область", "хнс", "чугуїв", "куп", "люботин", "богодухів", "дергачі", "вовчанськ"])
     if is_kharkiv:
         try:
             await client.send_message(MY_CHANNEL, event.message)
-            logger.info("♻️ Ретрансляція Харківщини")
+            logger.info("♻️ Ретрансляція повідомлення")
         except: pass
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
@@ -121,7 +123,7 @@ async def parser_handler(event):
     raw_text = event.raw_text
     text_lc = raw_text.lower()
     
-    # 1. ОБРОБКА ТРИВОГ (ЗАФАРБОВУВАННЯ РАЙОНІВ)
+    # 1. ОБРОБКА ТРИВОГ
     if any(x in raw_text for x in ["🔴", "🟢", "тривога", "відбій"]):
         alerts = db('alerts.json')
         updated = False
@@ -134,7 +136,7 @@ async def parser_handler(event):
             db('alerts.json', alerts)
             return
 
-    # 2. ОБРОБКА МІТОК (СПИСКИ ЦІЛЕЙ)
+    # 2. ОБРОБКА МІТОК (РОБОТА ЗІ СПИСКАМИ)
     lines = raw_text.split('\n')
     found_threat = get_threat_type(text_lc)
     targets_to_save = []
@@ -145,7 +147,8 @@ async def parser_handler(event):
         loc_name = clean_location_name(line)
         coords = await get_coords(loc_name)
         
-        if not coords and "харків" in text_lc: # Фолбек на Харків
+        # Якщо в рядку не знайдено конкретного села, але це загальне повідомлення про Харків
+        if not coords and "харків" in line.lower():
             coords = [49.9935, 36.2304, "Харків (Моніторинг)"]
 
         if coords:
@@ -156,7 +159,7 @@ async def parser_handler(event):
                 "lng": coords[1],
                 "label": f"{SYMBOLS.get(found_threat, '❓')} | {coords[2]}",
                 "time": datetime.now().strftime("%H:%M"),
-                "expire_at": (datetime.now() + timedelta(minutes=40)).isoformat()
+                "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
             }
             targets_to_save.append(new_target)
 
@@ -164,12 +167,13 @@ async def parser_handler(event):
         targets = db('targets.json')
         if not isinstance(targets, list): targets = []
         
-        # Видаляємо старі версії цього ж повідомлення, якщо вони були
-        targets = [t for t in targets if not t['id'].startswith(str(event.id))]
+        # Очищуємо старі записи з цим ID повідомлення
+        targets = [t for t in targets if not str(t.get('id', '')).startswith(str(event.id))]
         targets.extend(targets_to_save)
         
-        db('targets.json', targets[-25:]) # Зберігаємо 25 останніх точок
-        logger.info(f"✅ Додано {len(targets_to_save)} міток на карту")
+        # Зберігаємо останні 30 міток для карти
+        db('targets.json', targets[-30:])
+        logger.info(f"✅ Карту оновлено: {len(targets_to_save)} цілей")
 
 async def main():
     await client.start()
