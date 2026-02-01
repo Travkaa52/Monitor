@@ -25,10 +25,17 @@ ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i
 MY_CHANNEL = 'monitorkh1654' 
 SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
 
-# Стан системи
 IS_PARSING_ENABLED = True
 
-# ================= СЛОВНИКИ ТА КОНСТАНТИ =================
+# Локальна база для миттєвої відповіді без запиту до API
+CITY_FALLBACK = {
+    "Харків": [49.9935, 36.2304],
+    "Чугуїв": [49.8356, 36.6863],
+    "Богодухів": [50.1653, 35.5235],
+    "Дергачі": [50.1136, 36.1205],
+    "Люботин": [49.9486, 35.9281],
+    "Куп'янськ": [49.7075, 37.6158]
+}
 
 THREAT_TYPES = {
     "ballistics": {"keywords": ["баліст", "іскандер", "кинджал", "кн-23"], "icon": "img/ballistic.png", "label": "Балістика", "ttl": 15},
@@ -36,7 +43,7 @@ THREAT_TYPES = {
     "missile": {"keywords": ["ракета", "пуск", "х-59", "х-31"], "icon": "img/missile.png", "label": "Ракета", "ttl": 15},
     "kab": {"keywords": ["каб", "авіабомб", "керована"], "icon": "img/kab.png", "label": "КАБ", "ttl": 25},
     "shahed": {"keywords": ["шахед", "шахєд", "герань", "мопед"], "icon": "img/drone.png", "label": "Шахед", "ttl": 45},
-    "gerbera": {"keywords": ["гербера"], "icon": "img/drone.png", "label": "Гербера", "ttl": 40},
+    "gerbera": {"keywords": ["gerbera", "гербера"], "icon": "img/drone.png", "label": "Гербера", "ttl": 40},
     "molniya": {"keywords": ["молнія", "молния"], "icon": "img/molniya.png", "label": "Молнія", "ttl": 30},
     "lancet": {"keywords": ["ланцет"], "icon": "img/lancet.png", "label": "Ланцет", "ttl": 25},
     "recon": {"keywords": ["розвід", "орлан", "зала", "суперкам"], "icon": "img/recon.png", "label": "Розвідник", "ttl": 30},
@@ -58,38 +65,7 @@ SOURCE_ZONES = {
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 db_lock = threading.Lock()
 
-# ================= ЛОГІКА ПАРСИНГУ =================
-
-def clean_location_name(text):
-    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|БПЛА|Тип|Шахед|Ракета|Зафіксовано|Попередньо|!|\.)', ' ', text, flags=re.IGNORECASE).strip()
-    match = re.search(r'(?:курсом|на|в|через|бік|напрямок|біля|у бік)\s+([А-ЯІЇЄ][а-яіїє\']+)', clean, flags=re.IGNORECASE)
-    if match:
-        name = match.group(1).strip()
-        if name.endswith('у'): name = name[:-1] + 'а'
-        elif name.endswith('єва'): name = name[:-3] + 'їв'
-        return name
-    words = clean.split()
-    for word in words:
-        if word and word[0].isupper() and len(word) > 3:
-            return word.strip(' ,.-')
-    return None
-
-async def get_coords_online(place_name):
-    query = f"{place_name}, Харківська область, Україна"
-    url = "https://nominatim.openstreetmap.org/search"
-    headers = {"User-Agent": f"TacticalMonitor_{uuid.uuid4().hex[:6]}"}
-    try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, params={"q": query, "format": "json", "limit": 1}, timeout=5) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data:
-                        res = data[0]
-                        return [float(res["lat"]), float(res["lon"]), res["display_name"].split(',')[0]]
-    except: pass
-    return None
-
-# ================= РОБОТА З БД ТА GIT =================
+# ================= ДОПОМІЖНІ ФУНКЦІЇ =================
 
 def db_sync(file, data=None):
     with db_lock:
@@ -106,110 +82,88 @@ def db_sync(file, data=None):
 def commit_and_push():
     try:
         if os.path.exists(".git/index.lock"): os.remove(".git/index.lock")
-        subprocess.run(["git", "add", "targets.json"], check=False)
-        subprocess.run(["git", "commit", "-m", "📡 Tactical Update"], check=False)
-        subprocess.run(["git", "push"], check=False)
+        subprocess.run(["git", "add", "targets.json"], check=False, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "📡 Tactical Update"], check=False, capture_output=True)
+        subprocess.run(["git", "push"], check=False, capture_output=True)
     except: pass
 
-# ================= АВТО-ОЧИЩЕННЯ =================
+def clean_location_name(text):
+    # Видалення спецсимволів та шумів
+    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|БПЛА|Тип|Шахед|Ракета|Зафіксовано|Попередньо|!|\.)', ' ', text, flags=re.IGNORECASE).strip()
+    match = re.search(r'(?:курсом|на|в|через|бік|напрямок|біля|у бік|район)\s+([А-ЯІЇЄ][а-яіїє\']+)', clean, flags=re.IGNORECASE)
+    if match:
+        name = match.group(1).strip()
+        # Мінімальна нормалізація відмінків
+        if name.endswith('у'): name = name[:-1] + 'а'
+        elif name.endswith('єва'): name = name[:-3] + 'їв'
+        return name
+    return None
 
-async def cleaner_task():
-    while True:
-        await asyncio.sleep(30)
-        targets = db_sync('targets.json')
-        now = datetime.now().isoformat()
-        active_targets = [t for t in targets if t.get('expire_at', '') > now]
-        if len(active_targets) != len(targets):
-            logger.info(f"🧹 Очищення: видалено {len(targets) - len(active_targets)} застарілих цілей")
-            db_sync('targets.json', active_targets)
+async def get_coords_online(place_name):
+    # 1. Перевірка локальної бази
+    if place_name in CITY_FALLBACK:
+        return [CITY_FALLBACK[place_name][0], CITY_FALLBACK[place_name][1], place_name]
+    
+    # 2. Запит до OSM Nominatim
+    query = f"{place_name}, Харківська область, Україна"
+    url = "https://nominatim.openstreetmap.org/search"
+    headers = {"User-Agent": f"TacticalMonitor_{uuid.uuid4().hex[:6]}"}
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, params={"q": query, "format": "json", "limit": 1}, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data:
+                        res = data[0]
+                        return [float(res["lat"]), float(res["lon"]), res["display_name"].split(',')[0]]
+    except: pass
+    return None
 
-# ================= АДМІН-ПАНЕЛЬ =================
-
-@client.on(events.NewMessage(chats=ADMIN_IDS, pattern='/admin'))
-async def admin_panel(event):
-    buttons = [
-        [Button.inline(f"{'🔴 СТОП' if IS_PARSING_ENABLED else '🟢 СТАРТ'} ПАРСИНГ", b"toggle_parsing")],
-        [Button.inline("❌ ОЧИСТИТИ ВСЕ", b"clear_all")],
-        [Button.inline("📋 АКТИВНІ ЦІЛІ", b"list_active")]
-    ]
-    await event.respond("🛡 **NEPTUN TACTICAL ADMIN**\nКерування системою:", buttons=buttons)
-
-@client.on(events.CallbackQuery())
-async def callback_handler(event):
-    global IS_PARSING_ENABLED
-    data = event.data
-    if data == b"toggle_parsing":
-        IS_PARSING_ENABLED = not IS_PARSING_ENABLED
-        await event.answer(f"Парсинг: {'ВКЛ' if IS_PARSING_ENABLED else 'ВИКЛ'}")
-        await event.edit(f"Статус змінено. Парсинг: {'🟢' if IS_PARSING_ENABLED else '🔴'}")
-    elif data == b"clear_all":
-        db_sync('targets.json', [])
-        await event.answer("Карта очищена!")
-    elif data == b"list_active":
-        targets = db_sync('targets.json')
-        msg = "📍 **Активні цілі:**\n" + "\n".join([f"• {t['label']} ({t['time']})" for t in targets]) if targets else "Цілей немає."
-        await event.respond(msg)
-
-# ================= ОБРОБНИКИ ПОДІЙ =================
-
-@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
-async def retranslator(event):
-    if not IS_PARSING_ENABLED or not event.raw_text: return
-    text_lc = event.raw_text.lower()
-    if any(w in text_lc for w in ["харків", "область", "чугуїв", "каб", "шахед", "ракета"]):
-        await client.send_message(MY_CHANNEL, event.message)
+# ================= ОБРОБНИКИ =================
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
 async def handle_my_channel(event):
-    if not IS_PARSING_ENABLED: return
-    raw_text = event.raw_text or ""
+    if not IS_PARSING_ENABLED or not event.raw_text: return
+    raw_text = event.raw_text
     text_lc = raw_text.lower()
 
-    # 1. Ключові слова на видалення
+    # 1. Очищення при відбої
     if any(k in text_lc for k in ["відбій", "чисто", "відміна"]):
         db_sync('targets.json', [])
-        logger.info("🧹 Видалено всі мітки (Відбій)")
+        logger.info("🧹 Карта очищена за командою відбою")
         return
 
-    # 2. Визначення типу загрози
+    # 2. Детекція типу та кількості
     threat_id = "unknown"
     for tid, info in THREAT_TYPES.items():
         if any(keyword in text_lc for keyword in info["keywords"]):
             threat_id = tid
             break
     
-    threat_info = THREAT_TYPES[threat_id]
+    count_match = re.search(r'(\d+)\s+(?:шах|рак|бпла|молн)', text_lc)
+    count = int(count_match.group(1)) if count_match else 1
     
-    # 3. Визначення джерела (Крим, Море, Бєлгород тощо)
-    source_zone = None
-    for zone_name, zone_info in SOURCE_ZONES.items():
-        if any(k in text_lc for k in zone_info["keywords"]):
-            source_zone = zone_name
-            break
-
-    coords = None
-    label = ""
-
+    # 3. Джерело або Місто
+    source_zone = next((z for z, i in SOURCE_ZONES.items() if any(k in text_lc for k in i["keywords"])), None)
+    
+    coords, label = None, ""
     if source_zone:
-        # Пріоритет джерела (НЕ шукати місто)
         coords = [SOURCE_ZONES[source_zone]["coords"][0], SOURCE_ZONES[source_zone]["coords"][1], source_zone]
-        label = f"{threat_info['label']} | {source_zone}"
+        label = f"{THREAT_TYPES[threat_id]['label']} | {source_zone}"
     else:
-        # Пошук міста (як було раніше)
-        location = clean_location_name(raw_text)
-        if location:
-            coords = await get_coords_online(location)
-            if not coords and "харків" in location.lower():
-                coords = [49.9935, 36.2304, "Харків"]
+        loc_name = clean_location_name(raw_text)
+        if loc_name:
+            coords = await get_coords_online(loc_name)
             if coords:
-                label = f"{threat_info['label']} | {coords[2]}"
+                label = f"{THREAT_TYPES[threat_id]['label']} | {coords[2]}"
 
+    # 4. Запис у JSON
     if coords:
         targets = db_sync('targets.json')
-        # Оновлення або додавання
+        # Видаляємо дублікат за лейблом (оновлення позиції)
         targets = [t for t in targets if t['label'] != label]
         
-        expire_time = datetime.now() + timedelta(minutes=threat_info['ttl'])
+        expire_at = (datetime.now() + timedelta(minutes=THREAT_TYPES[threat_id]['ttl'])).isoformat()
         
         targets.append({
             "id": str(uuid.uuid4())[:8],
@@ -217,16 +171,46 @@ async def handle_my_channel(event):
             "lat": coords[0],
             "lng": coords[1],
             "label": label,
-            "icon": threat_info["icon"],
+            "count": count,
+            "icon": THREAT_TYPES[threat_id]["icon"],
             "time": datetime.now().strftime("%H:%M"),
-            "expire_at": expire_time.isoformat()
+            "expire_at": expire_at
         })
         db_sync('targets.json', targets)
-        logger.info(f"✅ Додано: {label}")
+        logger.info(f"✅ Ціль додана: {label} (x{count})")
+
+# ================= СИСТЕМНІ ТАСКИ =================
+
+@client.on(events.NewMessage(chats=ADMIN_IDS, pattern='/admin'))
+async def admin_panel(event):
+    buttons = [
+        [Button.inline(f"{'🔴 STOP' if IS_PARSING_ENABLED else '🟢 START'} PARSING", b"toggle")],
+        [Button.inline("❌ CLEAR ALL", b"clear")]
+    ]
+    await event.respond("🛡 **ADMIN PANEL**", buttons=buttons)
+
+@client.on(events.CallbackQuery())
+async def callback_handler(event):
+    global IS_PARSING_ENABLED
+    if event.data == b"toggle":
+        IS_PARSING_ENABLED = not IS_PARSING_ENABLED
+        await event.edit(f"Parsing: {'🟢 ON' if IS_PARSING_ENABLED else '🔴 OFF'}")
+    elif event.data == b"clear":
+        db_sync('targets.json', [])
+        await event.answer("Targets cleared!")
+
+async def cleaner_task():
+    while True:
+        await asyncio.sleep(30)
+        targets = db_sync('targets.json')
+        now = datetime.now().isoformat()
+        active = [t for t in targets if t.get('expire_at', '') > now]
+        if len(active) != len(targets):
+            db_sync('targets.json', active)
+            logger.info(f"🧹 Прибрано {len(targets) - len(active)} об'єктів")
 
 async def main():
     await client.start(bot_token=BOT_TOKEN)
-    logger.info("🚀 СИСТЕМА ПРАЦЮЄ ТА ОЧИЩУЄТЬСЯ")
     asyncio.create_task(cleaner_task())
     await client.run_until_disconnected()
 
