@@ -6,6 +6,7 @@ import threading
 import logging
 import subprocess
 import aiohttp
+import uuid
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -21,7 +22,6 @@ SESSION_STRING = os.getenv("SESSION_STRING", "")
 MY_CHANNEL = 'monitorkh1654' 
 SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
 
-# Райони для зафарбовування
 DISTRICTS_MAP = {
     "Богодухів": "Bohodukhivskyi",
     "Харків": "Kharkivskyi",
@@ -32,16 +32,18 @@ DISTRICTS_MAP = {
     "Красноград": "Krasnohradskyi"
 }
 
+# Розширений словник символів
 SYMBOLS = {
-    "air_defense": "💥 ППО", "drone": "🛵 Мопед", "missile": "🚀 Ракета",
+    "air_defense": "🛡️ ППО", "drone": "🛵 Мопед", "missile": "🚀 Ракета",
     "kab": "☄️ КАБ", "mrls": "🔥 РСЗВ", "recon": "🛸 Розвідка",
-    "aircraft": "✈️ Авіація", "unknown": "❓ Невідомо"
+    "aircraft": "✈️ Авіація", "artillery": "💥 Арта", "s300": "🚜 С-300",
+    "unknown": "❓ Невідомо"
 }
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 db_lock = threading.Lock()
 
-# ================= СИСТЕМНІ ФУНКЦІЇ (БАЗА ТА ГІТ) =================
+# ================= СИСТЕМНІ ФУНКЦІЇ =================
 
 def db(file, data=None):
     with db_lock:
@@ -54,24 +56,23 @@ def db(file, data=None):
             with open(file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             try:
-                subprocess.run(["git", "config", "user.name", "NeptunBot"], check=False)
-                subprocess.run(["git", "config", "user.email", "bot@neptun.com"], check=False)
                 subprocess.run(["git", "add", file], check=False)
-                subprocess.run(["git", "commit", "-m", f"📡 Sync {file}", "--no-verify"], check=False)
+                subprocess.run(["git", "commit", "-m", f"📡 Sync {file}"], check=False)
                 subprocess.run(["git", "push"], check=False)
             except: pass
 
-# ================= ГЕО-ФУНКЦІЇ (СТАРІ) =================
+# ================= ГЕО ТА ПАРСИНГ =================
 
 def clean_location_name(text):
-    """Твоя стара логіка очищення тексту"""
-    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення|БПЛА|Ракета|КАБ|Шахед|Мопед)', '', text, flags=re.IGNORECASE).strip()
+    """Стара логіка очищення з покращеним пошуком локації"""
+    # Видаляємо службові слова
+    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення|БПЛА|Ракета|КАБ|Шахед|Мопед|розвідувальні|1|2|3|біля)', '', text, flags=re.IGNORECASE).strip()
+    # Витягуємо назву до першого роздільника або ключового слова курсу
     parts = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз|біля)', clean, flags=re.IGNORECASE)
-    name = parts[0].strip().replace('"', '').replace('«', '').replace('»', '')
+    name = parts[0].strip().replace('"', '').replace('«', '').replace('»', '').replace(':', '')
     return name if len(name) > 2 else None
 
 async def get_coords(place):
-    """Твоя стара логіка запитів до OSM"""
     if not place: return None
     url = "https://nominatim.openstreetmap.org/search"
     params = {"q": f"{place}, Харківська область, Україна", "format": "json", "limit": 1}
@@ -84,76 +85,91 @@ async def get_coords(place):
     except: pass
     return None
 
-# ================= ЛОГІКА РЕТРАНСЛЯТОРА (СТАРА) =================
+def get_threat_type(text_lc):
+    """Визначає тип загрози за ключовими словами"""
+    mapping = {
+        "drone": ["шахед", "мопед", "shahed","гербера", ""],
+        "missile": ["ракета", "крилата", "балістика"],
+        "kab": ["каб", "авіабомб", "фаб"],
+        "recon": ["розвідник", "розвідувальні бпла", "Развед.БпЛА", "supercam", "zala"],
+        "mrls": ["рсзо", "град", "ураган", "смерч"],
+        "s300": ["с300", "с-300"],
+        "artillery": ["арта", "артилерія", "вихід", "обстріл"],
+        "aircraft": ["міг", "су-", "авіація", "борт"]
+        "molniya": ["Молния", "БПЛА типу "Молнія"]
+    }
+    for t_type, keys in mapping.items():
+        if any(k in text_lc for k in keys):
+            return t_type
+    return "unknown"
+
+# ================= ОБРОБНИКИ =================
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def retranslator_handler(event):
     if not event.raw_text: return
     text_lc = event.raw_text.lower()
-    
-    # Фільтрація повідомлень про Харківщину
-    is_kharkiv = any(word in text_lc for word in ["харків", "область", "хнс", "чугуїв", "куп", "люботин", "богодухів"])
-    
+    is_kharkiv = any(word in text_lc for word in ["харків", "область", "хнс", "чугуїв", "куп", "люботин", "богодухів", "дергачі"])
     if is_kharkiv:
         try:
             await client.send_message(MY_CHANNEL, event.message)
-            logger.info("♻️ Ретрансляція успішна")
-        except Exception as e:
-            logger.error(f"Помилка пересилки: {e}")
-
-# ================= ЛОГІКА ПАРСЕРА (ТОЧКИ + РАЙОНИ) =================
+            logger.info("♻️ Ретрансляція Харківщини")
+        except: pass
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
 async def parser_handler(event):
     raw_text = event.raw_text
     text_lc = raw_text.lower()
     
-    # 1. ОБРОБКА ТРИВОГ (НОВА ЛОГІКА ЗАФАРБОВУВАННЯ)
+    # 1. ОБРОБКА ТРИВОГ (ЗАФАРБОВУВАННЯ РАЙОНІВ)
     if any(x in raw_text for x in ["🔴", "🟢", "тривога", "відбій"]):
         alerts = db('alerts.json')
         updated = False
         for ua_pattern, en_id in DISTRICTS_MAP.items():
             if ua_pattern.lower() in text_lc:
-                # 🔴 - тривога, 🟢 - відбій
                 is_active = "🔴" in raw_text or "тривога" in text_lc
                 alerts[en_id] = {"active": is_active}
                 updated = True
         if updated:
             db('alerts.json', alerts)
-            logger.info("🚨 СТАТУС РАЙОНІВ ОНОВЛЕНО")
             return
 
-    # 2. ОБРОБКА МІТОК (СТАРА ЛОГІКА З ФОЛБЕКОМ)
-    loc_name = clean_location_name(raw_text)
-    coords = await get_coords(loc_name)
+    # 2. ОБРОБКА МІТОК (СПИСКИ ЦІЛЕЙ)
+    lines = raw_text.split('\n')
+    found_threat = get_threat_type(text_lc)
+    targets_to_save = []
     
-    if not coords:
-        # Якщо локацію не розпізнано, ставимо Харків, щоб повідомлення було на карті
-        coords = [49.9935, 36.2304, "Харків (Моніторинг)"]
+    for line in lines:
+        if len(line.strip()) < 5: continue
+        
+        loc_name = clean_location_name(line)
+        coords = await get_coords(loc_name)
+        
+        if not coords and "харків" in text_lc: # Фолбек на Харків
+            coords = [49.9935, 36.2304, "Харків (Моніторинг)"]
 
-    # Тип загрози
-    found_type = "unknown"
-    for t_type, keywords in [("drone", ["шахед", "мопед"]), ("missile", ["ракет"]), ("kab", ["каб", "авіабомб"])]:
-        if any(word in text_lc for word in keywords):
-            found_type = t_type; break
+        if coords:
+            new_target = {
+                "id": f"{event.id}_{uuid.uuid4().hex[:4]}",
+                "type": found_threat,
+                "lat": coords[0],
+                "lng": coords[1],
+                "label": f"{SYMBOLS.get(found_threat, '❓')} | {coords[2]}",
+                "time": datetime.now().strftime("%H:%M"),
+                "expire_at": (datetime.now() + timedelta(minutes=40)).isoformat()
+            }
+            targets_to_save.append(new_target)
 
-    new_target = {
-        "id": event.id,
-        "type": found_type,
-        "lat": coords[0],
-        "lng": coords[1],
-        "label": f"{SYMBOLS.get(found_type, '❓')} | {coords[2]}",
-        "time": datetime.now().strftime("%H:%M"),
-        "expire_at": (datetime.now() + timedelta(minutes=40)).isoformat()
-    }
-
-    targets = db('targets.json')
-    if not isinstance(targets, list): targets = []
-    
-    targets = [t for t in targets if t['id'] != event.id]
-    targets.append(new_target)
-    db('targets.json', targets[-15:]) # Зберігаємо останні 15 міток
-    logger.info(f"✅ Метка додана: {coords[2]}")
+    if targets_to_save:
+        targets = db('targets.json')
+        if not isinstance(targets, list): targets = []
+        
+        # Видаляємо старі версії цього ж повідомлення, якщо вони були
+        targets = [t for t in targets if not t['id'].startswith(str(event.id))]
+        targets.extend(targets_to_save)
+        
+        db('targets.json', targets[-25:]) # Зберігаємо 25 останніх точок
+        logger.info(f"✅ Додано {len(targets_to_save)} міток на карту")
 
 async def main():
     await client.start()
