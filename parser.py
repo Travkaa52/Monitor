@@ -139,7 +139,7 @@ async def handle_my_channel(event):
         targets = [t for t in targets if t['id'] != event.id]
         
         # Час життя цілі: 45 хвилин (можна змінити)
-        expire_time = datetime.now() + timedelta(minutes=45)
+        expire_time = datetime.now() + timedelta(minutes=15)
         
         targets.append({
             "id": event.id, "type": threat, "lat": coords[0], "lng": coords[1],
@@ -159,3 +159,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
