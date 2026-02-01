@@ -32,7 +32,6 @@ DISTRICTS_MAP = {
     "Красноград": "Krasnohradskyi"
 }
 
-# Розширений словник символів
 SYMBOLS = {
     "air_defense": "🛡️ ППО", "drone": "🛵 Мопед", "missile": "🚀 Ракета",
     "kab": "☄️ КАБ", "mrls": "🔥 РСЗВ", "recon": "🛸 Розвідка",
@@ -53,9 +52,19 @@ def db(file, data=None):
                 with open(file, 'r', encoding='utf-8') as f: return json.load(f)
             except: return [] if 'targets' in file else {}
         else:
+            # Видалення застарілих цілей перед записом (якщо це targets.json)
+            if 'targets' in file:
+                now = datetime.now().isoformat()
+                data = [t for t in data if t.get('expire_at', now) > now]
+
             with open(file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            
             try:
+                # Автоматичне налаштування Git Identity, щоб не було помилок commit
+                subprocess.run(["git", "config", "user.email", "bot@neptun.system"], check=False)
+                subprocess.run(["git", "config", "user.name", "Neptun Bot"], check=False)
+                
                 subprocess.run(["git", "add", file], check=False)
                 subprocess.run(["git", "commit", "-m", f"📡 Sync {file}"], check=False)
                 subprocess.run(["git", "push"], check=False)
@@ -66,9 +75,7 @@ def db(file, data=None):
 
 def clean_location_name(text):
     """Очищення тексту для пошуку координат"""
-    # Видаляємо службові слова, включаючи кількість та нові типи БПЛА
     clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення|БПЛА|Ракета|КАБ|Шахед|Мопед|розвідувальні|молнія|гербера|1|2|3|біля|в області)', '', text, flags=re.IGNORECASE).strip()
-    # Витягуємо назву до першого роздільника
     parts = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз|біля|район)', clean, flags=re.IGNORECASE)
     name = parts[0].strip().replace('"', '').replace('«', '').replace('»', '').replace(':', '')
     return name if len(name) > 2 else None
@@ -87,12 +94,11 @@ async def get_coords(place):
     return None
 
 def get_threat_type(text_lc):
-    """Визначає тип загрози за ключовими словами"""
     mapping = {
         "drone": ["шахед", "мопед", "shahed", "гербера"],
         "missile": ["ракета", "крилата", "балістика"],
         "kab": ["каб", "авіабомб", "фаб"],
-        "recon": ["розвідник", "розвідувальні", "развед.БпЛА", "supercam", "zala", "орлан"],
+        "recon": ["розвідник", "розвідувальні", "развед", "supercam", "zala", "орлан"],
         "mrls": ["рсзо", "рсзв", "град", "ураган", "смерч"],
         "s300": ["с300", "с-300"],
         "artillery": ["арта", "артилерія", "вихід", "обстріл"],
@@ -110,7 +116,6 @@ def get_threat_type(text_lc):
 async def retranslator_handler(event):
     if not event.raw_text: return
     text_lc = event.raw_text.lower()
-    # Розширений список міст для фільтрації
     is_kharkiv = any(word in text_lc for word in ["харків", "область", "хнс", "чугуїв", "куп", "люботин", "богодухів", "дергачі", "вовчанськ"])
     if is_kharkiv:
         try:
@@ -136,7 +141,7 @@ async def parser_handler(event):
             db('alerts.json', alerts)
             return
 
-    # 2. ОБРОБКА МІТОК (РОБОТА ЗІ СПИСКАМИ)
+    # 2. ОБРОБКА МІТОК
     lines = raw_text.split('\n')
     found_threat = get_threat_type(text_lc)
     targets_to_save = []
@@ -147,9 +152,8 @@ async def parser_handler(event):
         loc_name = clean_location_name(line)
         coords = await get_coords(loc_name)
         
-        # Якщо в рядку не знайдено конкретного села, але це загальне повідомлення про Харків
         if not coords and "харків" in line.lower():
-            coords = [49.9935, 36.2304, "Харків (Моніторинг)"]
+            coords = [49.9935, 36.2304, "Харків"]
 
         if coords:
             new_target = {
@@ -159,7 +163,7 @@ async def parser_handler(event):
                 "lng": coords[1],
                 "label": f"{SYMBOLS.get(found_threat, '❓')} | {coords[2]}",
                 "time": datetime.now().strftime("%H:%M"),
-                "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
+                "expire_at": (datetime.now() + timedelta(minutes=40)).isoformat()
             }
             targets_to_save.append(new_target)
 
@@ -167,12 +171,12 @@ async def parser_handler(event):
         targets = db('targets.json')
         if not isinstance(targets, list): targets = []
         
-        # Очищуємо старі записи з цим ID повідомлення
+        # Видаляємо старі записи з цим ID повідомлення, щоб уникнути дублів при редагуванні
         targets = [t for t in targets if not str(t.get('id', '')).startswith(str(event.id))]
         targets.extend(targets_to_save)
         
-        # Зберігаємо останні 30 міток для карти
-        db('targets.json', targets[-30:])
+        # Зберігаємо актуальні цілі
+        db('targets.json', targets)
         logger.info(f"✅ Карту оновлено: {len(targets_to_save)} цілей")
 
 async def main():
