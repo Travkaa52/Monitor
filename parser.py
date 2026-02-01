@@ -19,7 +19,7 @@ logger = logging.getLogger("NEPTUN_CORE")
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "") 
-MY_CHANNEL = 'monitorkh1654' # Канал, где бот берет данные для карты
+MY_CHANNEL = 'monitorkh1654' 
 SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
 
 DISTRICTS_MAP = {
@@ -67,18 +67,13 @@ def db(file, data=None):
 # --- ГЕО-ПОИСК (OSM) ---
 
 def clean_location_name(text):
-    """Извлекает только название населенного пункта"""
-    # Убираем лишнее
     clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|Уточнення|БПЛА|Ракета|КАБ|Шахед|Мопед|молнія|гербера|1|2|3)', '', text, flags=re.IGNORECASE).strip()
-    # Отсекаем направление
     parts = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз|напрямок)', clean, flags=re.IGNORECASE)
     candidate = parts[0].strip().replace('"', '').replace('«', '').replace('»', '').replace(':', '')
-    # Убираем статус района/села
     candidate = re.sub(r'^(біля|в|у|район|селище|село|місто|смт|області|районі)\s+', '', candidate, flags=re.IGNORECASE).strip()
     return candidate if len(candidate) > 2 else None
 
 async def get_coords(place):
-    """Живой поиск через OpenStreetMap"""
     if not place: return None
     url = "https://nominatim.openstreetmap.org/search"
     params = {
@@ -116,58 +111,69 @@ def get_threat_type(text_lc):
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def retranslator_handler(event):
-    """Шаг 1: Берем из источников и постим в ваш канал"""
+    """Шаг 1: Ретрансляция с вашим расширенным списком ключевых слов"""
     if not event.raw_text: return
     text_lc = event.raw_text.lower()
-    # Фильтр по ключевым словам области
-    if any(word in text_lc for word in ["харків", "область", "чугуїв", "куп'янськ", "богодухів", "дергачі", "бпла", "Балістика", "Є загроза для", "купянск", "шахед", "шаболда", "Развед.БПЛА", "КАБ на", "Швидкісна на", "Активність тактичної авіації на сході", "Активність тактичної авіації на північному-сході"]):
+    
+    # Ваш полный список ключевых слов
+    keywords = [
+        "харків", "область", "чугуїв", "куп'янськ", "богодухів", "дергачі", 
+        "бпла", "балістика", "є загроза для", "купянск", "шахед", "шаболда", 
+        "развед.бпла", "каб на", "швидкісна на", "активність тактичної авіації",
+        "хнс", "люботин", "вовчанськ"
+    ]
+    
+    if any(word in text_lc for word in keywords):
         try:
-            # Пересылаем в ваш канал (это триггерит parser_handler)
             await client.send_message(MY_CHANNEL, event.message)
-            logger.info("📩 Сообщение переслано в мониторинг")
+            logger.info("📩 Сообщение ретранслировано в ваш канал")
         except Exception as e:
             logger.error(f"Retranslate error: {e}")
 
-@client.on(events.NewMessage(chats=MY_CHANNEL))
+# ОБРАБОТЧИК ДЛЯ ВАШЕГО КАНАЛА (слушает и входящие, и свои исходящие)
+@client.on(events.NewMessage(chats=MY_CHANNEL, incoming=True, outgoing=True))
 async def parser_handler(event):
-    """Шаг 2: ВСЁ, что попало в ваш канал, превращаем в метку на карте"""
+    """Шаг 2: Вся логика обработки меток"""
     raw_text = event.raw_text
     if not raw_text: return
     
     text_lc = raw_text.lower()
-    logger.info(f"🔎 Обработка сообщения из канала: {raw_text[:50]}...")
+    logger.info(f"🔎 Анализ сообщения в канале {MY_CHANNEL}...")
 
-    # 1. Обработка тревог
+    # 1. СТАТУСЫ ТРЕВОГ
     if any(x in raw_text for x in ["🔴", "🟢", "тривога", "відбій"]):
         alerts = db('alerts.json')
         updated = False
-        for ua, en_id in DISTRICTS_MAP.items():
-            if ua.lower() in text_lc:
+        for ua_pattern, en_id in DISTRICTS_MAP.items():
+            if ua_pattern.lower() in text_lc:
                 alerts[en_id] = {"active": "🔴" in raw_text or "тривога" in text_lc}
                 updated = True
         if updated:
             db('alerts.json', alerts)
             return
 
-    # 2. Обработка целей (через OSM)
+    # 2. ПОИСК ЦЕЛЕЙ
     lines = raw_text.split('\n')
-    threat = get_threat_type(text_lc)
+    found_threat = get_threat_type(text_lc)
     targets_to_save = []
-
+    
     for line in lines:
         if len(line.strip()) < 5: continue
+        
         loc_name = clean_location_name(line)
         coords = await get_coords(loc_name)
         
+        # Резервный поиск по Харькову
         if not coords and "харків" in line.lower():
             coords = [49.9935, 36.2304, "Харків"]
 
         if coords:
             targets_to_save.append({
                 "id": f"{event.id}_{uuid.uuid4().hex[:4]}",
-                "type": threat,
-                "lat": coords[0], "lng": coords[1],
-                "label": f"{SYMBOLS.get(threat, '❓')} | {coords[2]}",
+                "type": found_threat,
+                "lat": coords[0],
+                "lng": coords[1],
+                "label": f"{SYMBOLS.get(found_threat, '❓')} | {coords[2]}",
                 "time": datetime.now().strftime("%H:%M"),
                 "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
             })
@@ -175,18 +181,19 @@ async def parser_handler(event):
     if targets_to_save:
         targets = db('targets.json')
         if not isinstance(targets, list): targets = []
-        # Удаляем старые метки этого же сообщения (если оно редактировалось)
+        
+        # Удаляем старые записи этого же сообщения (чтобы не было дублей при редактировании)
         targets = [t for t in targets if not str(t.get('id', '')).startswith(str(event.id))]
         targets.extend(targets_to_save)
+        
         db('targets.json', targets)
-        logger.info(f"📍 Карта: добавлено {len(targets_to_save)} меток")
+        logger.info(f"📍 Карта: {len(targets_to_save)} новых меток.")
 
+# --- ЗАПУСК ---
 async def main():
     await client.start()
-    logger.info("🚀 СИСТЕМА ЗАПУЩЕНА: Источники -> Канал -> Карта")
+    logger.info("🚀 БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
     asyncio.run(main())
-
-
