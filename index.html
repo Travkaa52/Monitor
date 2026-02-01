@@ -34,7 +34,6 @@
             text-transform: uppercase;
         }
 
-        /* CRT Ефект */
         body::after {
             content: " ";
             position: fixed; inset: 0;
@@ -111,6 +110,22 @@
             border-bottom: 15px solid var(--ally);
             filter: drop-shadow(0 0 5px var(--ally));
         }
+
+        /* Анімації пульсації */
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+        }
+        @keyframes pulse-yellow {
+            0% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 235, 59, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0); }
+        }
+        .pulse-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            position: absolute; top: 11px; left: 11px;
+        }
     </style>
 </head>
 <body>
@@ -139,7 +154,7 @@
     <div class="drawer" id="listDrawer">
         <div style="display:flex; justify-content: space-between; margin-bottom: 15px;">
             <strong>АКТИВНІ ЗАГРОЗИ</strong>
-            <span onclick="toggleDrawer()" style="color:var(--hazard);">ЗАКРИТИ</span>
+            <span onclick="toggleDrawer()" style="color:var(--hazard); cursor:pointer;">ЗАКРИТИ</span>
         </div>
         <div id="targetsList" style="overflow-y:auto; height:90%;"></div>
     </div>
@@ -171,7 +186,6 @@
             map = L.map('map', { zoomControl: false, attributionControl: false }).setView([49.99, 36.23], 9);
             baseLayers.dark.addTo(map);
 
-            // GPS Локація
             map.locate({watch: true, enableHighAccuracy: true});
             map.on('locationfound', (e) => {
                 userPos = e.latlng;
@@ -184,14 +198,13 @@
                 }
             });
 
-            // Завантаження GeoJSON один раз
             try {
                 const gRes = await fetch(GEO_URL);
                 geoData = await gRes.json();
             } catch(e) { console.error("GeoJSON missing"); }
 
             updateLoop();
-            setInterval(updateLoop, 10000); // Оновлення раз на 10 сек
+            setInterval(updateLoop, 10000); 
             
             setInterval(() => {
                 document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA');
@@ -206,7 +219,7 @@
         async function syncAlerts() {
             if (!geoData) return;
             try {
-                const res = await fetch(`${ALERTS_URL}?v=${Date.now()}`);
+                const res = await fetch(`${ALERTS_URL}?v=${Date.now()}`, { cache: "no-store" });
                 const alerts = await res.json();
 
                 if (districtLayer) map.removeLayer(districtLayer);
@@ -228,7 +241,8 @@
 
         async function syncTargets() {
             try {
-                const res = await fetch(`${TARGETS_URL}?v=${Date.now()}`);
+                const res = await fetch(`${TARGETS_URL}?v=${Date.now()}`, { cache: "no-store" });
+                if (!res.ok) throw new Error('Network error');
                 const data = await res.json();
                 
                 const activeIds = new Set();
@@ -236,11 +250,18 @@
                     const id = String(obj.id);
                     activeIds.add(id);
 
+                    // Спеціальна логіка для Молнії
+                    const isMolniya = obj.type === 'molniya';
+                    const dotClass = isMolniya ? 'pulse-yellow' : 'pulse-red';
+                    const dotColor = isMolniya ? '#ffeb3b' : 'red';
+
                     const icon = L.divIcon({
                         className: 'target-marker',
                         html: `<div style="position:relative;">
-                                 <div style="background:red; width:8px; height:8px; border-radius:50%; position:absolute; top:11px; left:11px; box-shadow:0 0 10px red;"></div>
-                                 <img src="${ICONS_PATH}${obj.type}.png" style="width:30px; height:30px;" onerror="this.style.opacity='0'">
+                                 <div class="pulse-dot" style="background:${dotColor}; animation: ${dotClass} 1.5s infinite;"></div>
+                                 <img src="${ICONS_PATH}${obj.type}.png" 
+                                      style="width:30px; height:30px; position:relative; z-index:10;" 
+                                      onerror="this.src='https://img.icons8.com/emoji/48/high-voltage-emoji.png';">
                                </div>`,
                         iconSize: [30, 30], iconAnchor: [15, 15]
                     });
@@ -265,6 +286,7 @@
                 document.getElementById('conn-status').style.color = 'var(--ally)';
                 updateUIList();
             } catch(e) { 
+                console.error("Targets sync failed", e);
                 document.getElementById('conn-status').innerText = 'ERR';
                 document.getElementById('conn-status').style.color = 'var(--danger)';
             }
@@ -281,7 +303,7 @@
                             </div>
                             <div style="color:var(--hazard); font-weight:bold;">${dist} KM</div>
                         </div>`;
-            }).join('') || '<div style="text-align:center; opacity:0.5;">ЧИСТЕ НЕБО</div>';
+            }).join('') || '<div style="text-align:center; opacity:0.5; padding-top:20px;">ЧИСТЕ НЕБО</div>';
         }
 
         function focusTarget(lat, lng) { map.flyTo([lat, lng], 13); toggleDrawer(); }
