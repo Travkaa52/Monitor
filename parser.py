@@ -23,7 +23,7 @@ MY_CHANNEL = 'monitorkh1654'
 SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
 
 # Вставьте сюда свой ID (узнать можно в @userinfobot)
-ADMIN_IDS = [123456789] 
+ADMIN_IDS = [5423792783] 
 
 DISTRICTS_MAP = {
     "Богодухів": "Bohodukhivskyi", "Харків": "Kharkivskyi",
@@ -200,3 +200,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
