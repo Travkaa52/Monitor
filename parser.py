@@ -43,7 +43,7 @@ def safe_git_push(file):
             lock_path = ".git/index.lock"
             if os.path.exists(lock_path): os.remove(lock_path)
             subprocess.run(["git", "add", file], check=False, capture_output=True)
-            subprocess.run(["git", "commit", "-m", f"update {datetime.now().strftime('%H:%M')}"], check=False, capture_output=True)
+            subprocess.run(["git", "commit", "-m", f"upd {datetime.now().strftime('%H:%M')}"], check=False, capture_output=True)
             subprocess.run(["git", "push"], check=False, capture_output=True)
         finally:
             git_lock.release()
@@ -68,25 +68,36 @@ def db_sync(file, data=None):
 
 async def get_coords(place):
     if not place or len(place.strip()) < 3: return None
+    # Очищення від залишків сміття перед запитом
+    clean_place = re.sub(r'[^а-яА-ЯіІїЇєЄ\s-]', '', place).strip()
+    if len(clean_place) < 3: return None
+
     url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": f"{place}, Харківська область", "format": "json", "limit": 1}
+    params = {
+        "q": f"{clean_place}, Харківська область", 
+        "format": "json", 
+        "limit": 1,
+        "accept-language": "uk"
+    }
     try:
         async with aiohttp.ClientSession() as session:
-            headers = {"User-Agent": f"Neptun_{uuid.uuid4().hex[:4]}"}
+            headers = {"User-Agent": f"NeptunMapBot_{uuid.uuid4().hex[:6]}"}
             async with session.get(url, params=params, headers=headers, timeout=5) as resp:
+                if resp.status != 200: return None
                 data = await resp.json()
-                if data: return [float(data[0]["lat"]), float(data[0]["lon"]), data[0]["display_name"].split(',')[0]]
+                if data: 
+                    return [float(data[0]["lat"]), float(data[0]["lon"]), data[0]["display_name"].split(',')[0]]
     except: pass
     return None
 
 def get_threat_type(text):
     text = text.lower()
     mapping = {
-        "drone": ["шахед", "мопед", "гербера"],
-        "missile": ["ракета", "х-", "іскандер"],
-        "kab": ["каб", "фаб", "авіабомб"],
+        "drone": ["шахед", "мопед", "гербера", "shahed"],
+        "missile": ["ракета", "х-", "іскандер", "калібр"],
+        "kab": ["каб", "фаб", "авіабомб", "упмп"],
         "recon": ["розвід", "орлан", "zala", "суперкам", "бпла"],
-        "mrls": ["рсзв", "град", "смерч"],
+        "mrls": ["рсзв", "град", "смерч", "ураган"],
         "s300": ["с300", "с-300"]
     }
     for t_type, keys in mapping.items():
@@ -97,37 +108,44 @@ def get_threat_type(text):
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def retranslator(event):
-    """ Копіює з чужих каналів у твій """
     if not event.raw_text: return
-    # Якщо текст містить ключові слова - пересилаємо
-    if any(w in event.raw_text.lower() for w in ["харків", "бпла", "каб", "ракета", "увага"]):
-        await client.send_message(MY_CHANNEL, event.message)
-        logger.info(f"📩 Переслано повідомлення {event.id}")
+    text = event.raw_text.lower()
+    # Фільтр для пересилання: тільки те, що стосується загрози
+    if any(w in text for w in ["харків", "область", "чугуїв", "куп", "ізюм", "бпла", "каб", "ракета"]):
+        try:
+            await client.send_message(MY_CHANNEL, event.message)
+            logger.info(f"📩 Переслано: {event.id}")
+        except: pass
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
 async def main_parser(event):
-    """ Аналізує все, що з'явилося у ТВОЄМУ каналі (в т.ч. переслане ботом) """
     raw_text = event.raw_text or ""
     if not raw_text or raw_text.startswith('/'): return
     
-    logger.info(f"🔎 Аналіз поста у {MY_CHANNEL}...")
+    logger.info(f"🔎 Аналіз нового поста...")
     
     targets = db_sync('targets.json')
-    # Очищуємо старі мітки цього повідомлення (якщо воно редагується)
-    targets = [t for t in targets if not str(t.get('id','')).startswith(f"m{event.id}")]
+    msg_id = f"m{event.id}"
+    targets = [t for t in targets if not str(t.get('id','')).startswith(msg_id)]
     
     global_type = get_threat_type(raw_text)
     new_found = False
 
     for line in raw_text.split('\n'):
-        if len(line.strip()) < 3: continue
+        line = line.strip()
+        if len(line) < 4: continue
         
-        # 1. Шукаємо населений пункт (чистимо рядок)
-        p = re.sub(r'(\d+|🚨|⚠️|БПЛА|Ракета|КАБ|Шахед|н\.п\.|біля|нп|в напрямку|курсом|—|-|:)', '', line, flags=re.IGNORECASE).strip()
-        p = re.split(r'(на|в|через|бік|межах)', p, flags=re.IGNORECASE)[0].strip()
-        p = re.sub(r'^(у|в|селище|село|місто|смт)\s+', '', p, flags=re.IGNORECASE).strip()
+        # 1. Очищення рядка від стоп-слів
+        p = re.sub(r'(\d+|🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|БПЛА|Ракета|КАБ|Шахед|Мопед|н\.п\.|біля|нп|—|-|:)', '', line, flags=re.IGNORECASE).strip()
+        p = re.split(r'(курсом|на|в|через|бік|межах|повз|напрямок)', p, flags=re.IGNORECASE)[0].strip()
+        p = re.sub(r'^(у|в|селище|село|місто|смт|області|районі)\s+', '', p, flags=re.IGNORECASE).strip()
 
+        if len(p) < 3: continue
+
+        logger.info(f"🛰 Запит координатів для: [{p}]")
+        
         coords = await get_coords(p)
+        
         # Підстраховка для Харкова
         if not coords and "харків" in line.lower():
             coords = [49.9935, 36.2304, "Харків"]
@@ -137,15 +155,18 @@ async def main_parser(event):
             if threat == "unknown": threat = global_type
             
             targets.append({
-                "id": f"m{event.id}_{uuid.uuid4().hex[:4]}",
+                "id": f"{msg_id}_{uuid.uuid4().hex[:4]}",
                 "type": threat,
                 "lat": coords[0], "lng": coords[1],
-                "label": f"{SYMBOLS[threat]} | {coords[2]}",
+                "label": f"{SYMBOLS.get(threat, '❓')} | {coords[2]}",
                 "time": datetime.now().strftime("%H:%M"),
                 "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
             })
             new_found = True
-            logger.info(f"📍 Знайдено ціль: {threat} у {coords[2]}")
+            logger.info(f"✅ УСПІХ: {threat} знайдено у {coords[2]}")
+        
+        # Обов'язкова пауза, щоб Nominatim не банив
+        await asyncio.sleep(1.2)
 
     if new_found:
         db_sync('targets.json', targets)
@@ -153,7 +174,8 @@ async def main_parser(event):
 # --- ЗАПУСК ---
 async def main():
     await client.start()
-    logger.info("🚀 БОТ ПРАЦЮЄ")
+    logger.info("🚀 СИСТЕМА ПРАЦЮЄ")
     await client.run_until_disconnected()
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())
