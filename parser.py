@@ -2,7 +2,6 @@ import os
 import re
 import asyncio
 import json
-import threading
 import logging
 import subprocess
 import aiohttp
@@ -12,8 +11,8 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # Налаштування логів
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s: %(message)s')
-logger = logging.getLogger("NEPTUN_TACTICAL_PRO")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger("NEPTUN_FINAL")
 
 # ================= КОНФІГУРАЦІЯ =================
 API_ID = int(os.getenv("API_ID", 0))
@@ -21,196 +20,203 @@ API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "") 
 MY_CHANNEL = 'monitorkh1654' 
-SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
+SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov', 'kharkiv_life']
 
-# Словник символів та профілів загрози
-THREAT_MAP = {
-    "шахед": {"sym": "🛵", "type": "drone", "ttl": 45},
-    "гербера": {"sym": "🛵", "type": "drone", "ttl": 40},
-    "молнія": {"sym": "⚡", "type": "drone", "ttl": 30},
-    "ланцет": {"sym": "🎯", "type": "drone", "ttl": 20},
-    "ракета": {"sym": "🚀", "type": "missile", "ttl": 15},
-    "балістика": {"sym": "☄️", "type": "ballistics", "ttl": 10},
-    "каб": {"sym": "☄️", "type": "kab", "ttl": 25},
-    "крилата": {"sym": "🚀", "type": "missile", "ttl": 20},
-    "невідомо": {"sym": "❓", "type": "unknown", "ttl": 30}
+# Параметри типів загроз
+THREAT_PROFILES = {
+    "шахед": {"type": "drone", "ttl": 60, "icon": "🛵"},
+    "гербера": {"type": "drone", "ttl": 45, "icon": "🛵"},
+    "молнія": {"type": "drone", "ttl": 30, "icon": "⚡"},
+    "ланцет": {"type": "drone", "ttl": 20, "icon": "🎯"},
+    "ракета": {"type": "missile", "ttl": 15, "icon": "🚀"},
+    "балістика": {"type": "ballistics", "ttl": 10, "icon": "☄️"},
+    "каб": {"type": "kab", "ttl": 30, "icon": "☄️"},
+    "відбій": {"type": "clear", "ttl": 0, "icon": "✅"}
 }
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-db_lock = threading.Lock()
 
-# ================= ЯДРО ПАРСИНГУ (ADVANCED) =================
+# ================= СИСТЕМА ОБРОБКИ ДАНИХ =================
 
-def extract_count(text):
-    """Визначає кількість об'єктів у тексті."""
-    if re.search(r'(декілька|група|зграя)', text, re.I): return "група"
-    match = re.search(r'(\d+)\s*(бпла|шах|ракет)', text, re.I)
-    return int(match.group(1)) if match else 1
+class DataController:
+    _lock = asyncio.Lock()
+    file_path = 'targets.json'
 
-def clean_location_name(text):
-    """Покращений парсер локацій для складних повідомлень."""
-    # Видаляємо шумові фрази та рекламу
-    text = re.sub(r'(підписуйтесь|посилання|канал|інфо|моніторинг|⚠️|🚨)', '', text, flags=re.I)
+    @classmethod
+    async def read(cls):
+        async with cls._lock:
+            if not os.path.exists(cls.file_path): return []
+            try:
+                with open(cls.file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Read Error: {e}")
+                return []
+
+    @classmethod
+    async def write(cls, data):
+        async with cls._lock:
+            try:
+                with open(cls.file_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info(f"💾 JSON Updated: {len(data)} objects")
+                # Запуск Git синхронізації у фоні
+                asyncio.create_task(cls.git_push())
+            except Exception as e:
+                logger.error(f"Write Error: {e}")
+
+    @classmethod
+    async def git_push(cls):
+        try:
+            subprocess.run(["git", "add", cls.file_path], check=False, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "📡 Tactical Update"], check=False, capture_output=True)
+            proc = subprocess.run(["git", "push"], check=False, capture_output=True)
+            if proc.returncode == 0: logger.info("🚀 Git Push Success")
+        except: pass
+
+# ================= ІНТЕЛЕКТУАЛЬНИЙ ПАРСЕР =================
+
+
+
+def parse_message(text):
+    text = text.lower()
+    result = {
+        "threat": "невідомо",
+        "locations": [],
+        "count": 1,
+        "is_terminal": False,
+        "is_status": False
+    }
+
+    # 1. Визначення термінальних станів
+    if any(x in text for x in ["відбій", "чисто", "не відстежується", "зник"]):
+        result["is_terminal"] = True
+        return result
+
+    # 2. Визначення типу загрози
+    for key, profile in THREAT_PROFILES.items():
+        if key in text:
+            result["threat"] = key
+            break
+
+    # 3. Визначення кількості
+    if "декілька" in text or "група" in text: result["count"] = "група"
+    num_match = re.search(r'(\d+)\s*(бпла|шах|ракет|молн)', text)
+    if num_match: result["count"] = int(num_match.group(1))
+
+    # 4. Вилучення локацій (Складна логіка)
+    # Шукаємо слова з великої літери після прийменників рухів
+    loc_matches = re.findall(r'(?:на|через|в\s+район|бік|курсом\s+на)\s+([А-ЯІЇЄ][а-яіїє\']+)', text, re.IGNORECASE)
     
-    # Шукаємо локації через роздільники та прийменники
-    # Наприклад: "Кочеток/Чугуїв" або "Богодухів та найближчі н.п."
-    locations = []
+    # Обробка слешів (Кочеток/Чугуїв)
+    slash_matches = re.findall(r'([А-ЯІЇЄ][а-яіїє\']+)(?=/| та)', text)
     
-    # Шаблон для пошуку назв міст з великої літери
-    pattern = r'(?:на|в|через|бік|біля|курсом\s+на|рух\s+на)\s+([А-ЯІЇЄ][а-яіїє\']+)'
-    matches = re.findall(pattern, text)
+    raw_locations = list(set(loc_matches + slash_matches))
+    result["locations"] = [l.strip() for l in raw_locations if len(l) > 3]
+
+    if "на даний час" in text or "в області" in text and not result["locations"]:
+        result["is_status"] = True
+
+    return result
+
+async def get_coords(loc):
+    # Пріоритетний список (Харківщина) для миттєвої відповіді
+    manual_db = {
+        "Харків": [49.9935, 36.2304],
+        "Чугуїв": [49.8356, 36.6863],
+        "Богодухів": [50.1653, 35.5235],
+        "Слатине": [50.2114, 36.1558],
+        "Прудянка": [50.2383, 36.1264],
+        "Безруки": [50.1683, 36.1186],
+        "Кочеток": [49.8683, 36.7275],
+        "Дергачі": [50.1136, 36.1205],
+        "Люботин": [49.9486, 35.9281]
+    }
     
-    if not matches:
-        # Спроба знайти через слеш: Кочеток/Чугуїв
-        slash_match = re.findall(r'([А-ЯІЇЄ][а-яіїє\']+)(?=/| та)', text)
-        if slash_match: matches.extend(slash_match)
-
-    for m in matches:
-        m = m.strip()
-        if len(m) > 3: locations.append(m)
-        
-    return list(set(locations))
-
-async def get_coords_online(place_name):
-    """Геокодування через Nominatim з обробкою помилок."""
-    query = f"{place_name}, Харківська область, Україна"
+    if loc in manual_db: return manual_db[loc] + [loc]
+    
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {"User-Agent": f"TacticalMonitor_V6_{uuid.uuid4().hex[:6]}"}
+    params = {"q": f"{loc}, Харківська область, Україна", "format": "json", "limit": 1}
+    headers = {"User-Agent": "TacticalParser_v6"}
+    
     try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, params={"q": query, "format": "json", "limit": 1}, timeout=5) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data:
-                        return [float(data[0]["lat"]), float(data[0]["lon"]), data[0]["display_name"].split(',')[0]]
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=5) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    if data: return [float(data[0]["lat"]), float(data[0]["lon"]), loc]
     except: pass
     return None
 
-# ================= ЛОГІКА БД ТА ПАМ'ЯТІ =================
-
-def db_sync(file, data=None):
-    with db_lock:
-        if data is None:
-            if not os.path.exists(file): return []
-            try:
-                with open(file, 'r', encoding='utf-8') as f: return json.load(f)
-            except: return []
-        else:
-            with open(file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            # Запуск Git синхронізації у фоні
-            threading.Thread(target=commit_and_push, daemon=True).start()
-
-def commit_and_push():
-    try:
-        subprocess.run(["git", "add", "targets.json"], check=False, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "📡 Tactical Sync"], check=False, capture_output=True)
-        subprocess.run(["git", "push"], check=False, capture_output=True)
-    except: pass
-
-# ================= ОБРОБНИК ПОДІЙ =================
-
-@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
-async def retranslator(event):
-    """Фільтрація та ретрансляція повідомлень з джерел."""
-    if not event.raw_text: return
-    text = event.raw_text.lower()
-    # Ігноруємо відбої в ретрансляторі (обробляємо їх тільки в цілях)
-    if "відбій" in text: return 
-    
-    triggers = ["харків", "область", "чугуїв", "бпла", "ракета", "каб", "шахед", "ланцет", "молнія"]
-    if any(t in text for t in triggers):
-        await client.send_message(MY_CHANNEL, event.message)
+# ================= ОБРОБНИКИ ТА ЛОГІКА ЦІЛЕЙ =================
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
-async def handle_my_channel(event):
-    raw_text = event.raw_text or ""
-    text_lc = raw_text.lower()
+async def master_handler(event):
+    if not event.raw_text: return
+    raw = event.raw_text
+    parsed = parse_message(raw)
     
-    # 1. Обробка термінальних станів (Відбій / Зник / Не відстежується)
-    targets = db_sync('targets.json')
-    if any(x in text_lc for x in ["відбій", "більше не відстежується", "зник", "чисто"]):
-        logger.info("🛑 Сигнал завершення цілі / відбій")
-        # Якщо відбій - чистимо все, якщо "не відстежується" - можна мітити статус
-        if "відбій" in text_lc: targets = [] 
-        else:
-            for t in targets: t['status'] = 'finished'
-        db_sync('targets.json', targets)
+    targets = await DataController.read()
+    updated = False
+
+    # Логіка Відбою
+    if parsed["is_terminal"]:
+        if "відбій" in raw.lower(): targets = []
+        else: # "не відстежується" - мітимо конкретні або всі завершеними
+            for t in targets: t["status"] = "finished"
+        await DataController.write(targets)
         return
 
-    # 2. Визначення типу загрози та кількості
-    threat_key = "невідомо"
-    for k in THREAT_MAP.keys():
-        if k in text_lc:
-            threat_key = k
-            break
-            
-    count = extract_count(text_lc)
-    locations = clean_location_name(raw_text)
-    
-    if not locations:
-        if "в області" in text_lc: # Зведений статус
-            logger.info("ℹ️ Повідомлення про загальний статус в області")
-            return
-        return
+    if parsed["is_status"]: return # Пропускаємо загальні зведення
 
-    # 3. Створення / Оновлення цілей
-    new_targets_count = 0
-    for loc in locations:
-        coords = await get_coords_online(loc)
+    for loc in parsed["locations"]:
+        coords = await get_coords(loc)
         if not coords: continue
+
+        # Шукаємо дублікат для оновлення (якщо ціль вже є в цій локації)
+        existing = next((t for t in targets if t["label"] == loc and t["status"] == "active"), None)
         
-        # Перевіряємо, чи це оновлення існуючої цілі (продовження руху)
-        is_update = False
-        for t in targets:
-            if t['label'] == loc and t['status'] == 'active':
-                t['timestamp'] = int(datetime.now().timestamp())
-                t['expire_at'] = (datetime.now() + timedelta(minutes=THREAT_MAP[threat_key]['ttl'])).isoformat()
-                t['raw_text'] = raw_text
-                is_update = True
-                break
-        
-        if not is_update:
-            target_id = str(uuid.uuid4())
-            profile = THREAT_MAP[threat_key]
-            
+        if existing:
+            existing["timestamp"] = int(datetime.now().timestamp())
+            existing["expire_at"] = (datetime.now() + timedelta(minutes=THREAT_PROFILES.get(parsed["threat"], {"ttl": 20})["ttl"])).isoformat()
+            existing["raw_text"] = raw
+            existing["count"] = parsed["count"]
+            logger.info(f"🔄 Updated target in {loc}")
+        else:
+            profile = THREAT_PROFILES.get(parsed["threat"], {"type": "unknown", "ttl": 20, "icon": "❓"})
             new_obj = {
-                "uuid": target_id,
-                "msg_id": event.id,
-                "type": profile['type'],
-                "count": count,
+                "uuid": str(uuid.uuid4()),
+                "type": profile["type"],
+                "icon": profile["icon"],
+                "count": parsed["count"],
                 "lat": coords[0],
                 "lng": coords[1],
                 "label": loc,
-                "direction": "на " + loc,
                 "status": "active",
-                "raw_text": raw_text,
+                "raw_text": raw,
                 "timestamp": int(datetime.now().timestamp()),
-                "expire_at": (datetime.now() + timedelta(minutes=profile['ttl'])).isoformat()
+                "expire_at": (datetime.now() + timedelta(minutes=profile["ttl"])).isoformat()
             }
             targets.append(new_obj)
-            new_targets_count += 1
+            logger.info(f"📍 New target: {parsed['threat']} -> {loc}")
+        updated = True
 
-    if new_targets_count > 0 or is_update:
-        db_sync('targets.json', targets)
-        logger.info(f"✅ Оброблено: {threat_key} x{count}. Локацій: {len(locations)}")
+    if updated:
+        await DataController.write(targets)
 
-# ================= АВТО-ОЧИЩЕННЯ =================
-
-async def cleaner_task():
+async def auto_cleaner():
     while True:
-        await asyncio.sleep(60)
-        targets = db_sync('targets.json')
+        await asyncio.sleep(30)
+        targets = await DataController.read()
         now = datetime.now().isoformat()
-        active = [t for t in targets if t.get('expire_at', '') > now and t.get('status') != 'finished']
-        if len(active) != len(targets):
-            db_sync('targets.json', active)
-            logger.info(f"🧹 Очищено {len(targets) - len(active)} застарілих цілей")
+        cleaned = [t for t in targets if t["expire_at"] > now and t["status"] == "active"]
+        if len(cleaned) != len(targets):
+            await DataController.write(cleaned)
 
 async def main():
     await client.start(bot_token=BOT_TOKEN)
-    logger.info("🚀 TACTICAL MONITOR CORE v6.0 READY")
-    asyncio.create_task(cleaner_task())
+    logger.info("🔥 NEPTUN V6.5 PRO ACTIVE")
+    asyncio.create_task(auto_cleaner())
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
