@@ -1,214 +1,200 @@
 /**
- * TACTICAL MONITOR ENGINE v4.2
- * Повна синхронізація з HTML та Python-парсером
+ * TACTICAL MONITOR CORE v3.6.1 (RECOVERY)
  */
 
 "use strict";
 
-const AppState = {
+const state = {
     targets: [],
     markers: new Map(),
-    userCoords: null,
     alertRadius: 50,
     missileAlerts: true,
     autoFocus: false,
-    activePage: 'map',
-    notifiedIds: new Set(),
-
-    save() {
-        localStorage.setItem('tactical_v4_data', JSON.stringify({
-            alertRadius: this.alertRadius,
-            missileAlerts: this.missileAlerts,
-            autoFocus: this.autoFocus
-        }));
-    },
-
-    load() {
-        const saved = localStorage.getItem('tactical_v4_data');
-        if (saved) {
-            const data = JSON.parse(saved);
-            this.alertRadius = data.alertRadius || 50;
-            this.missileAlerts = data.missileAlerts ?? true;
-            this.autoFocus = data.autoFocus ?? false;
-        }
-        // Оновити інпути в UI
-        const radInput = document.getElementById('alert-radius');
-        if (radInput) radInput.value = this.alertRadius;
-    }
+    activePage: 'map'
 };
 
-const Router = {
+// --- РОУТЕР (ЗБЕРЕЖЕНО ОРИГІНАЛЬНІ АНІМАЦІЇ GSAP) ---
+const router = {
     go(pageId) {
-        console.log(`Router: Navigating to ${pageId}`);
+        const pages = document.querySelectorAll('.page');
+        const navBtns = document.querySelectorAll('.nav-btn');
         
-        // 1. Сховати всі сторінки
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        pages.forEach(p => {
+            p.classList.remove('active');
+            gsap.set(p, { opacity: 0, y: 10 });
+        });
         
-        // 2. Активувати потрібну
         const next = document.getElementById(`page-${pageId}`);
         if (next) {
             next.classList.add('active');
-            AppState.activePage = pageId;
-            
-            // GSAP анімація появи
-            gsap.fromTo(next, { opacity: 0, y: 5 }, { opacity: 1, y: 0, duration: 0.3 });
+            gsap.to(next, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" });
+            state.activePage = pageId;
         }
 
-        // 3. Оновити кнопки навігації
-        document.querySelectorAll('.nav-btn').forEach(btn => {
+        navBtns.forEach(btn => {
             const isTarget = btn.id === `nav-${pageId}`;
-            btn.classList.toggle('opacity-100', isTarget);
+            btn.style.opacity = isTarget ? "1" : "0.5";
             btn.classList.toggle('text-orange-500', isTarget);
-            btn.classList.toggle('opacity-50', !isTarget);
         });
 
-        // 4. Пофіксити розмір карти при переході
-        if (pageId === 'map' && MapManager.instance) {
-            setTimeout(() => MapManager.instance.invalidateSize(), 100);
+        if (pageId === 'map' && mapManager.instance) {
+            setTimeout(() => mapManager.instance.invalidateSize(), 200);
         }
     }
 };
 
-const MapManager = {
+// --- КЕРУВАННЯ UI ---
+const ui = {
+    init() {
+        this.loadSettings();
+        this.updateClock();
+        setInterval(() => this.updateClock(), 1000);
+    },
+
+    updateClock() {
+        const el = document.getElementById('clock');
+        if (el) el.innerText = new Date().toLocaleTimeString('uk-UA');
+    },
+
+    toggleSetting(key) {
+        state[key] = !state[key];
+        this.saveSettings();
+        this.applyVisualSettings();
+        this.log(`Налаштування: ${key} = ${state[key]}`);
+    },
+
+    updateRadius(val) {
+        state.alertRadius = parseInt(val);
+        this.saveSettings();
+    },
+
+    saveSettings() {
+        localStorage.setItem('tactical_settings', JSON.stringify({
+            radius: state.alertRadius,
+            missile: state.missileAlerts,
+            focus: state.autoFocus
+        }));
+    },
+
+    loadSettings() {
+        const saved = localStorage.getItem('tactical_settings');
+        if (saved) {
+            const d = JSON.parse(saved);
+            state.alertRadius = d.radius || 50;
+            state.missileAlerts = d.missile ?? true;
+            state.autoFocus = d.focus ?? false;
+            
+            const rInput = document.getElementById('alert-radius');
+            if (rInput) rInput.value = state.alertRadius;
+            this.applyVisualSettings();
+        }
+    },
+
+    applyVisualSettings() {
+        // Missile Toggle
+        const dotM = document.getElementById('dot-missile');
+        const bgM = document.getElementById('toggle-missile');
+        if (dotM) dotM.style.transform = state.missileAlerts ? 'translateX(20px)' : 'translateX(0)';
+        if (bgM) bgM.style.backgroundColor = state.missileAlerts ? '#f97316' : '#292524';
+
+        // Focus Toggle
+        const dotF = document.getElementById('dot-focus');
+        const bgF = document.getElementById('toggle-focus');
+        if (dotF) dotF.style.transform = state.autoFocus ? 'translateX(20px)' : 'translateX(0)';
+        if (bgF) bgF.style.backgroundColor = state.autoFocus ? '#f97316' : '#292524';
+    },
+
+    renderTargets(targets) {
+        const container = document.getElementById('targets-container');
+        if (!container) return;
+
+        container.innerHTML = targets.length ? targets.map(t => `
+            <div class="glass p-3 mb-2 border-l-4 border-orange-500 flex justify-between items-center" 
+                 onclick="router.go('map'); mapManager.instance.flyTo([${t.lat}, ${t.lng}], 12)">
+                <div>
+                    <div class="text-[11px] font-bold text-orange-500 uppercase">${t.label}</div>
+                    <div class="text-[9px] opacity-60">${t.time} | Lat: ${t.lat.toFixed(2)}</div>
+                </div>
+                <img src="${t.icon}" class="w-8 h-8 opacity-80 object-contain">
+            </div>
+        `).join('') : '<p class="text-center opacity-20 py-10 text-xs">НЕБО ЧИСТЕ</p>';
+    },
+
+    log(msg) {
+        const container = document.getElementById('logs-container');
+        if (!container) return;
+        const div = document.createElement('div');
+        div.className = "border-l border-white/10 pl-2 py-1 opacity-70";
+        div.innerHTML = `<span class="text-orange-500/50">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+        container.prepend(div);
+    }
+};
+
+// --- КАРТА ---
+const mapManager = {
     instance: null,
 
     init() {
-        this.instance = L.map('map', { 
-            zoomControl: false, 
-            attributionControl: false 
-        }).setView([49.9935, 36.2304], 9);
+        this.instance = L.map('map', { zoomControl: false, attributionControl: false })
+            .setView([49.99, 36.23], 9);
 
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(this.instance);
     },
 
-    syncMarkers(targets) {
+    sync(targets) {
         const now = new Date().toISOString();
-        const currentIds = new Set(targets.map(t => String(t.id)));
+        const activeIds = new Set(targets.map(t => String(t.id)));
 
-        // Видалення
+        // Прибирання старих
         this.instance.eachLayer(layer => {
             if (layer instanceof L.Marker && layer.options.id) {
-                if (!currentIds.has(layer.options.id)) {
-                    this.instance.removeLayer(layer);
-                    AppState.markers.delete(layer.options.id);
-                }
+                if (!activeIds.has(layer.options.id)) this.instance.removeLayer(layer);
             }
         });
 
-        // Додавання/Оновлення
+        // Додавання нових
         targets.forEach(t => {
             if (t.expire_at && t.expire_at < now) return;
 
             const icon = L.icon({
-                iconUrl: t.icon || 'img/unknown.png',
+                iconUrl: t.icon,
                 iconSize: [32, 32],
                 iconAnchor: [16, 16],
                 className: (['missile', 'ballistics', 'kab'].includes(t.type)) ? 'threat-pulse' : ''
             });
 
-            if (AppState.markers.has(t.id)) {
-                AppState.markers.get(t.id).setLatLng([t.lat, t.lng]);
-            } else {
-                const m = L.marker([t.lat, t.lng], { icon, id: t.id }).addTo(this.instance);
-                m.bindPopup(`<b class="text-orange-500">${t.label}</b>`);
-                AppState.markers.set(t.id, m);
-                
-                if (AppState.autoFocus) this.instance.flyTo([t.lat, t.lng], 11);
-                UIManager.notify(`DETECTED: ${t.label}`, t.type === 'ballistics' ? 'danger' : 'warning');
-            }
+            const marker = L.marker([t.lat, t.lng], { icon, id: t.id }).addTo(this.instance);
+            marker.bindPopup(`<div class="text-[10px] uppercase font-bold text-orange-500">${t.label}</div>`);
+            
+            if (state.autoFocus && targets.length === 1) this.instance.flyTo([t.lat, t.lng], 11);
         });
     }
 };
 
-const UIManager = {
-    init() {
-        AppState.load();
-        this.syncToggles();
-        setInterval(() => {
-            document.getElementById('clock').innerText = new Date().toLocaleTimeString('uk-UA');
-        }, 1000);
-    },
-
-    toggleSetting(key) {
-        AppState[key] = !AppState[key];
-        AppState.save();
-        this.syncToggles();
-        this.notify(`SETTING: ${key.toUpperCase()} ${AppState[key] ? 'ON' : 'OFF'}`);
-    },
-
-    syncToggles() {
-        const t1 = document.getElementById('toggle-missile');
-        const t2 = document.getElementById('toggle-focus');
-        
-        if (t1) {
-            t1.classList.toggle('bg-orange-600', AppState.missileAlerts);
-            t1.querySelector('div').style.transform = AppState.missileAlerts ? 'translateX(24px)' : 'translateX(0)';
-        }
-        if (t2) {
-            t2.classList.toggle('bg-orange-600', AppState.autoFocus);
-            t2.querySelector('div').style.transform = AppState.autoFocus ? 'translateX(24px)' : 'translateX(0)';
-        }
-    },
-
-    updateRadius(val) {
-        AppState.alertRadius = parseInt(val);
-        AppState.save();
-        this.notify(`RADIUS UPDATED: ${val} KM`);
-    },
-
-    renderList(targets) {
-        const container = document.getElementById('targets-container');
-        if (!container) return;
-        
-        if (targets.length === 0) {
-            container.innerHTML = `<div class="text-center py-20 opacity-20 text-xs">CLEAR SKY</div>`;
-            return;
-        }
-
-        container.innerHTML = targets.map(t => `
-            <div class="glass p-4 border-l-4 border-orange-500 flex items-center justify-between" onclick="Router.go('map'); MapManager.instance.flyTo([${t.lat}, ${t.lng}], 12)">
-                <div>
-                    <div class="text-xs font-bold text-orange-500">${t.label}</div>
-                    <div class="text-[9px] opacity-50 font-mono">${t.time} | ID: ${t.id}</div>
-                </div>
-                <img src="${t.icon}" class="w-8 h-8 opacity-80">
-            </div>
-        `).join('');
-    },
-
-    notify(msg, type = 'info') {
-        const log = document.getElementById('logs-container');
-        if (!log) return;
-        const div = document.createElement('div');
-        div.className = `p-2 border-l-2 ${type === 'danger' ? 'border-red-600 bg-red-900/10' : 'border-orange-500 bg-orange-900/10'} mb-1`;
-        div.innerHTML = `<span class="opacity-40">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
-        log.prepend(div);
-        if (log.children.length > 30) log.lastChild.remove();
-    }
-};
-
-// Робимо об'єкти доступними для HTML
-window.Router = Router;
-window.UIManager = UIManager;
-
-// Запуск
+// --- СИНХРОНІЗАЦІЯ З ПАРСЕРОМ ---
 async function engine() {
     try {
         const res = await fetch(`targets.json?v=${Date.now()}`);
         const data = await res.json();
-        AppState.targets = data;
-        MapManager.syncMarkers(data);
-        UIManager.renderList(data);
-        document.getElementById('sync-status').innerText = 'Online';
+        
+        state.targets = data;
+        mapManager.sync(data);
+        ui.renderTargets(data);
+        
+        document.getElementById('sync-status').innerText = "ONLINE";
         document.getElementById('obj-count').innerText = data.length;
     } catch (e) {
-        document.getElementById('sync-status').innerText = 'Offline';
+        document.getElementById('sync-status').innerText = "ERROR";
     }
 }
 
+// Експорт об'єктів у глобальну видимість (щоб onclick працював)
+window.router = router;
+window.ui = ui;
+
 document.addEventListener('DOMContentLoaded', () => {
-    MapManager.init();
-    UIManager.init();
+    mapManager.init();
+    ui.init();
     engine();
-    setInterval(engine, 8000);
+    setInterval(engine, 5000);
 });
