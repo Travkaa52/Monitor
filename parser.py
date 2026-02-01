@@ -114,7 +114,12 @@ def commit_and_push():
 async def retranslator(event):
     if not event.raw_text: return
     text_lc = event.raw_text.lower()
-    if any(w in text_lc for w in ["харків", "область", "чугуїв", "куп", "ізюм", "бпла", "каб", "ракета"]):
+    if any(w in text_lc for w in ["харків", "область", "чугуїв", "куп'янськ", "богодухів",
+        "дергачі", "бпла", "балістика", "є загроза для",
+        "купянск", "шахед", "развед.бпла", "каб на",
+        "швидкісна на", "активність тактичної авіації",
+        "люботин", "вовчанськ"
+    ]):
         await client.send_message(MY_CHANNEL, event.message)
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
@@ -158,4 +163,5 @@ async def main():
 if __name__ == '__main__':
     asyncio.run(main())
     
+
 
