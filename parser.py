@@ -22,7 +22,7 @@ SESSION_STRING = os.getenv("SESSION_STRING", "")
 MY_CHANNEL = 'monitorkh1654' 
 SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
 
-# Вставьте сюда свой ID (узнать можно в @userinfobot)
+# Ваш ID для управления ботом в ЛС
 ADMIN_IDS = [5423792783] 
 
 DISTRICTS_MAP = {
@@ -62,7 +62,7 @@ def db(file, data=None):
                 subprocess.run(["git", "config", "user.email", "bot@neptun.system"], check=False)
                 subprocess.run(["git", "config", "user.name", "Neptun Bot"], check=False)
                 subprocess.run(["git", "add", file], check=False)
-                subprocess.run(["git", "commit", "-m", f"📡 Admin Update: {datetime.now().strftime('%H:%M:%S')}"], check=False)
+                subprocess.run(["git", "commit", "-m", f"📡 Update: {datetime.now().strftime('%H:%M:%S')}"], check=False)
                 subprocess.run(["git", "push"], check=False)
             except Exception as e:
                 logger.error(f"Git Sync Error: {e}")
@@ -114,9 +114,11 @@ def get_threat_type(text_lc):
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def retranslator_handler(event):
+    """Шаг 1: Ретрансляция из источников в ваш канал"""
     if not event.raw_text: return
     text_lc = event.raw_text.lower()
     keywords = ["харків", "область", "чугуїв", "куп'янськ", "богодухів", "дергачі", "бпла", "балістика", "є загроза для", "купянск", "шахед", "шаболда", "развед.бпла", "каб на", "швидкісна на", "активність тактичної авіації", "хнс", "люботин", "вовчанськ"]
+    
     if any(word in text_lc for word in keywords):
         try:
             await client.send_message(MY_CHANNEL, event.message)
@@ -124,31 +126,38 @@ async def retranslator_handler(event):
         except Exception as e:
             logger.error(f"Retranslate error: {e}")
 
+@client.on(events.NewMessage(incoming=True))
+async def admin_private_handler(event):
+    """АДМИН-ПАНЕЛЬ: Работает только в ЛС с ботом"""
+    if not event.is_private or event.sender_id not in ADMIN_IDS:
+        return
+
+    text_lc = event.raw_text.lower()
+    
+    if text_lc == '/clear':
+        db('targets.json', [])
+        await event.respond("🧹 **Карта очищена.** Все метки удалены.")
+        logger.info(f"🚫 Админ {event.sender_id} очистил карту")
+        
+    elif text_lc == '/info':
+        targets = db('targets.json')
+        alerts = db('alerts.json')
+        active_districts = [k for k, v in alerts.items() if v.get('active')]
+        msg = (
+            f"📊 **Статус системы:**\n"
+            f"📍 Меток на карте: `{len(targets)}` \n"
+            f"🚨 Тревога в: `{', '.join(active_districts) if active_districts else 'Нет активных'}`"
+        )
+        await event.respond(msg)
+
 @client.on(events.NewMessage(chats=MY_CHANNEL, incoming=True, outgoing=True))
 async def parser_handler(event):
+    """Шаг 2: Обработка постов в вашем канале (цели и тревоги)"""
     raw_text = event.raw_text
-    if not raw_text: return
+    if not raw_text or raw_text.startswith('/'): return
     
-    sender = await event.get_sender()
-    sender_id = event.sender_id
     text_lc = raw_text.lower()
-
-    # --- АДМИН-ПАНЕЛЬ (КОМАНДЫ) ---
-    if sender_id in ADMIN_IDS and raw_text.startswith('/'):
-        if text_lc == '/clear':
-            db('targets.json', [])
-            await event.reply("🧹 Карта очищена!")
-            return
-        elif text_lc == '/info':
-            targets = db('targets.json')
-            alerts = db('alerts.json')
-            active_districts = [k for k, v in alerts.items() if v.get('active')]
-            msg = f"📊 **Статистика:**\n📍 Меток на карте: {len(targets)}\n🚨 Тревога в: {', '.join(active_districts) if active_districts else 'нет'}"
-            await event.reply(msg)
-            return
-
-    # --- ЛОГИКА ОБРАБОТКИ СООБЩЕНИЙ ---
-    logger.info(f"🔎 Анализ: {raw_text[:30]}...")
+    logger.info(f"🔎 Анализ поста: {raw_text[:30]}...")
 
     # 1. СТАТУСЫ ТРЕВОГ
     if any(x in raw_text for x in ["🔴", "🟢", "тривога", "відбій"]):
@@ -191,13 +200,13 @@ async def parser_handler(event):
         targets = [t for t in targets if not str(t.get('id', '')).startswith(str(event.id))]
         targets.extend(targets_to_save)
         db('targets.json', targets)
-        logger.info(f"📍 Карта обновлена")
+        logger.info(f"📍 Метки обновлены из канала")
 
+# --- ЗАПУСК ---
 async def main():
     await client.start()
-    logger.info("🚀 Админ-бот запущен")
+    logger.info("🚀 БОТ ЗАПУЩЕН")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
     asyncio.run(main())
-
