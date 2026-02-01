@@ -196,7 +196,7 @@ async def admin_private_handler(event):
         msg = (
             f"📊 **Статус системы:**\n"
             f"📍 Меток на карте: `{len(targets)}`\n"
-            f"🚨 Тревога в: `{', '.join(active_districts) if active_districts else 'Нет активных'}`
+            f"🚨 Тревога в: `{', '.join(active_districts) if active_districts else 'Нет активных'}`"
         )
 
         await event.respond(msg)
@@ -271,3 +271,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
