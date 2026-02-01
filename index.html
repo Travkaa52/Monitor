@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0d0e0a">
-    <title>MONITOR KHARKIV | ТАКТИЧНА МАПА</title>
+    <title>MONITOR KHARKIV</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -34,6 +34,7 @@
             text-transform: uppercase;
         }
 
+        /* CRT Ефект */
         body::after {
             content: " ";
             position: fixed; inset: 0;
@@ -42,23 +43,23 @@
             background-size: 100% 3px, 3px 100%;
             z-index: 5000;
             pointer-events: none;
-            opacity: 0.2;
+            opacity: 0.15;
         }
 
-        #map { position: absolute; inset: 0; z-index: 1; background: #000; filter: contrast(1.1) brightness(0.9); }
+        #map { position: absolute; inset: 0; z-index: 1; background: #000; filter: contrast(1.1) brightness(0.85); }
 
         /* HUD Елементи */
         .top-hud {
             position: absolute; top: env(safe-area-inset-top, 10px); left: 8px; right: 8px;
-            z-index: 1000; pointer-events: none; display: flex; flex-direction: column; gap: 10px;
+            z-index: 1000; pointer-events: none; display: flex; flex-direction: column; gap: 8px;
         }
-        .hud-row { display: flex; justify-content: space-between; gap: 10px; pointer-events: auto; }
+        .hud-row { display: flex; justify-content: space-between; gap: 6px; pointer-events: auto; }
 
         .status-box {
             background: rgba(13, 14, 10, 0.92);
             border: 1px solid var(--multicam-dark);
             border-left: 4px solid var(--hazard);
-            padding: 10px 15px;
+            padding: 8px 12px;
             font-size: 10px;
             backdrop-filter: blur(10px);
             flex: 1;
@@ -67,10 +68,12 @@
 
         .top-btn {
             background: linear-gradient(135deg, var(--hazard) 0%, #b85c00 100%);
-            color: #000; border: none; padding: 10px 18px;
-            font-size: 9px; font-weight: 900;
-            clip-path: polygon(10% 0, 100% 0, 100% 70%, 90% 100%, 0 100%, 0 30%);
+            color: #000; border: none; padding: 8px 6px;
+            font-size: 8px; font-weight: 900;
+            clip-path: polygon(8% 0, 100% 0, 100% 70%, 92% 100%, 0 100%, 0 30%);
             cursor: pointer;
+            flex: 1;
+            white-space: nowrap;
         }
 
         .drawer {
@@ -100,7 +103,7 @@
         .control-btn {
             background: rgba(53, 59, 31, 0.3);
             border: 1px solid var(--multicam-dark);
-            color: var(--khaki); padding: 12px 2px; font-size: 8px; font-weight: 800;
+            color: var(--khaki); padding: 12px 2px; font-size: 7.5px; font-weight: 800;
             cursor: pointer;
         }
         .user-arrow {
@@ -109,22 +112,6 @@
             border-right: 8px solid transparent;
             border-bottom: 15px solid var(--ally);
             filter: drop-shadow(0 0 5px var(--ally));
-        }
-
-        /* Анімації пульсації */
-        @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(255, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
-        }
-        @keyframes pulse-yellow {
-            0% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(255, 235, 59, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 235, 59, 0); }
-        }
-        .pulse-dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            position: absolute; top: 11px; left: 11px;
         }
     </style>
 </head>
@@ -136,34 +123,35 @@
         <div class="hud-row">
             <div class="status-box">
                 <div style="display: flex; justify-content: space-between;">
-                    <span style="letter-spacing: 2px;">● NEPTUN SYSTEM</span>
+                    <span style="letter-spacing: 1px;">● MONITOR</span>
                     <span id="sys-time" style="color:var(--hazard);">00:00:00</span>
                 </div>
                 <div style="margin-top: 5px; display: flex; gap: 10px; font-size: 8px;">
                     <span>ЦІЛІ: <span id="targetCount" style="color:#fff;">0</span></span>
-                    <span>БАЗА: <span id="conn-status" style="color:var(--ally);">OK</span></span>
+                    <span>ЗВ'ЯЗОК: <span id="conn-status" style="color:var(--ally);">OK</span></span>
                 </div>
             </div>
         </div>
         <div class="hud-row">
-            <button class="top-btn" onclick="toggleLayers()">ЗМІНИТИ ШАР</button>
-            <button class="top-btn" onclick="window.open('https://t.me/monitorkh1654')">TG КАНАЛ</button>
+            <button class="top-btn" onclick="toggleLayers()">ШАР МАПИ</button>
+            <button class="top-btn" onclick="window.open('https://send.monobank.ua/jar/6R3gd9Ew8w')">ПІДТРИМКА ПРОЕКТУ</button>
+            <button class="top-btn" onclick="window.open('https://tme/moni54')">ТЕЛЕГРАМ</button>
         </div>
     </div>
 
     <div class="drawer" id="listDrawer">
         <div style="display:flex; justify-content: space-between; margin-bottom: 15px;">
             <strong>АКТИВНІ ЗАГРОЗИ</strong>
-            <span onclick="toggleDrawer()" style="color:var(--hazard); cursor:pointer;">ЗАКРИТИ</span>
+            <span onclick="toggleDrawer()" style="color:var(--hazard);">ЗАКРИТИ</span>
         </div>
         <div id="targetsList" style="overflow-y:auto; height:90%;"></div>
     </div>
 
     <div class="bottom-controls">
-        <button class="control-btn" onclick="toggleDrawer()">СПИСОК</button>
-        <button class="control-btn" onclick="centerMap()">ЦЕНТР</button>
-        <button class="control-btn" onclick="useGPS()">GPS</button>
-        <button class="control-btn" onclick="location.reload()">RELOAD</button>
+        <button class="control-btn" onclick="toggleDrawer()">СПИСОК ЦІЛЕЙ</button>
+        <button class="control-btn" onclick="centerMap()">ЦЕНТРУВАНЯ</button>
+        <button class="control-btn" onclick="useGPS()">МОЄ МІСЦЕЗНАХОДЖЕНЯ</button>
+        <button class="control-btn" onclick="location.reload()">ОНОВИТИ МАПУ</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -193,19 +181,16 @@
                     userMarker = L.marker(e.latlng, {
                         icon: L.divIcon({className: 'user-loc', html: '<div class="user-arrow"></div>', iconSize: [16, 16]})
                     }).addTo(map);
-                } else {
-                    userMarker.setLatLng(e.latlng);
-                }
+                } else { userMarker.setLatLng(e.latlng); }
             });
 
             try {
                 const gRes = await fetch(GEO_URL);
-                geoData = await gRes.json();
+                if(gRes.ok) geoData = await gRes.json();
             } catch(e) { console.error("GeoJSON missing"); }
 
             updateLoop();
-            setInterval(updateLoop, 10000); 
-            
+            setInterval(updateLoop, 10000);
             setInterval(() => {
                 document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('uk-UA');
             }, 1000);
@@ -219,11 +204,9 @@
         async function syncAlerts() {
             if (!geoData) return;
             try {
-                const res = await fetch(`${ALERTS_URL}?v=${Date.now()}`, { cache: "no-store" });
+                const res = await fetch(`${ALERTS_URL}?v=${Date.now()}`);
                 const alerts = await res.json();
-
                 if (districtLayer) map.removeLayer(districtLayer);
-
                 districtLayer = L.geoJson(geoData, {
                     style: (feature) => {
                         const name = feature.properties.name_en;
@@ -232,40 +215,30 @@
                             fillColor: active ? "var(--danger)" : "transparent",
                             fillOpacity: active ? 0.35 : 0,
                             color: "var(--multicam-dark)",
-                            weight: 1
+                            weight: 1.5,
+                            opacity: 0.8
                         };
                     }
                 }).addTo(map);
-            } catch(e) { console.warn("Alerts sync failed"); }
+            } catch(e) {}
         }
 
         async function syncTargets() {
             try {
-                const res = await fetch(`${TARGETS_URL}?v=${Date.now()}`, { cache: "no-store" });
-                if (!res.ok) throw new Error('Network error');
+                const res = await fetch(`${TARGETS_URL}?v=${Date.now()}`);
                 const data = await res.json();
-                
                 const activeIds = new Set();
                 data.forEach(obj => {
                     const id = String(obj.id);
                     activeIds.add(id);
-
-                    // Спеціальна логіка для Молнії
-                    const isMolniya = obj.type === 'molniya';
-                    const dotClass = isMolniya ? 'pulse-yellow' : 'pulse-red';
-                    const dotColor = isMolniya ? '#ffeb3b' : 'red';
-
                     const icon = L.divIcon({
                         className: 'target-marker',
                         html: `<div style="position:relative;">
-                                 <div class="pulse-dot" style="background:${dotColor}; animation: ${dotClass} 1.5s infinite;"></div>
-                                 <img src="${ICONS_PATH}${obj.type}.png" 
-                                      style="width:30px; height:30px; position:relative; z-index:10;" 
-                                      onerror="this.src='https://img.icons8.com/emoji/48/high-voltage-emoji.png';">
+                                 <div style="background:red; width:8px; height:8px; border-radius:50%; position:absolute; top:11px; left:11px; box-shadow:0 0 10px red;"></div>
+                                 <img src="${ICONS_PATH}${obj.type}.png" style="width:30px; height:30px;" onerror="this.parentElement.style.display='none'">
                                </div>`,
                         iconSize: [30, 30], iconAnchor: [15, 15]
                     });
-
                     if (targets.has(id)) {
                         targets.get(id).marker.setLatLng([obj.lat, obj.lng]).setIcon(icon);
                     } else {
@@ -273,20 +246,14 @@
                         targets.set(id, { marker, data: obj });
                     }
                 });
-
                 targets.forEach((val, id) => {
-                    if (!activeIds.has(id)) {
-                        map.removeLayer(val.marker);
-                        targets.delete(id);
-                    }
+                    if (!activeIds.has(id)) { map.removeLayer(val.marker); targets.delete(id); }
                 });
-
                 document.getElementById('targetCount').innerText = targets.size;
                 document.getElementById('conn-status').innerText = 'OK';
                 document.getElementById('conn-status').style.color = 'var(--ally)';
                 updateUIList();
             } catch(e) { 
-                console.error("Targets sync failed", e);
                 document.getElementById('conn-status').innerText = 'ERR';
                 document.getElementById('conn-status').style.color = 'var(--danger)';
             }
@@ -315,7 +282,6 @@
             currentLayer = currentLayer === 'dark' ? 'sat' : 'dark';
             baseLayers[currentLayer].addTo(map);
         }
-
         window.onload = init;
     </script>
 </body>
