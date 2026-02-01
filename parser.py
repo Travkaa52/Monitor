@@ -22,6 +22,9 @@ SESSION_STRING = os.getenv("SESSION_STRING", "")
 MY_CHANNEL = 'monitorkh1654' 
 SOURCE_CHANNELS = ['monitor1654', 'cxidua', 'tlknewsua', 'radar_kharkov']
 
+# Вставьте сюда свой ID (узнать можно в @userinfobot)
+ADMIN_IDS = [123456789] 
+
 DISTRICTS_MAP = {
     "Богодухів": "Bohodukhivskyi", "Харків": "Kharkivskyi",
     "Чугуїв": "Chuhuivskyi", "Ізюм": "Iziumskyi",
@@ -59,7 +62,7 @@ def db(file, data=None):
                 subprocess.run(["git", "config", "user.email", "bot@neptun.system"], check=False)
                 subprocess.run(["git", "config", "user.name", "Neptun Bot"], check=False)
                 subprocess.run(["git", "add", file], check=False)
-                subprocess.run(["git", "commit", "-m", f"📡 Map Update: {datetime.now().strftime('%H:%M:%S')}"], check=False)
+                subprocess.run(["git", "commit", "-m", f"📡 Admin Update: {datetime.now().strftime('%H:%M:%S')}"], check=False)
                 subprocess.run(["git", "push"], check=False)
             except Exception as e:
                 logger.error(f"Git Sync Error: {e}")
@@ -111,34 +114,41 @@ def get_threat_type(text_lc):
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def retranslator_handler(event):
-    """Шаг 1: Ретрансляция с вашим расширенным списком ключевых слов"""
     if not event.raw_text: return
     text_lc = event.raw_text.lower()
-    
-    # Ваш полный список ключевых слов
-    keywords = [
-        "харків", "область", "чугуїв", "куп'янськ", "богодухів", "дергачі", 
-        "бпла", "балістика", "є загроза для", "купянск", "шахед", "шаболда", 
-        "развед.бпла", "каб на", "швидкісна на", "активність тактичної авіації",
-        "хнс", "люботин", "вовчанськ"
-    ]
-    
+    keywords = ["харків", "область", "чугуїв", "куп'янськ", "богодухів", "дергачі", "бпла", "балістика", "є загроза для", "купянск", "шахед", "шаболда", "развед.бпла", "каб на", "швидкісна на", "активність тактичної авіації", "хнс", "люботин", "вовчанськ"]
     if any(word in text_lc for word in keywords):
         try:
             await client.send_message(MY_CHANNEL, event.message)
-            logger.info("📩 Сообщение ретранслировано в ваш канал")
+            logger.info("📩 Ретрансляция выполнена")
         except Exception as e:
             logger.error(f"Retranslate error: {e}")
 
-# ОБРАБОТЧИК ДЛЯ ВАШЕГО КАНАЛА (слушает и входящие, и свои исходящие)
 @client.on(events.NewMessage(chats=MY_CHANNEL, incoming=True, outgoing=True))
 async def parser_handler(event):
-    """Шаг 2: Вся логика обработки меток"""
     raw_text = event.raw_text
     if not raw_text: return
     
+    sender = await event.get_sender()
+    sender_id = event.sender_id
     text_lc = raw_text.lower()
-    logger.info(f"🔎 Анализ сообщения в канале {MY_CHANNEL}...")
+
+    # --- АДМИН-ПАНЕЛЬ (КОМАНДЫ) ---
+    if sender_id in ADMIN_IDS and raw_text.startswith('/'):
+        if text_lc == '/clear':
+            db('targets.json', [])
+            await event.reply("🧹 Карта очищена!")
+            return
+        elif text_lc == '/info':
+            targets = db('targets.json')
+            alerts = db('alerts.json')
+            active_districts = [k for k, v in alerts.items() if v.get('active')]
+            msg = f"📊 **Статистика:**\n📍 Меток на карте: {len(targets)}\n🚨 Тревога в: {', '.join(active_districts) if active_districts else 'нет'}"
+            await event.reply(msg)
+            return
+
+    # --- ЛОГИКА ОБРАБОТКИ СООБЩЕНИЙ ---
+    logger.info(f"🔎 Анализ: {raw_text[:30]}...")
 
     # 1. СТАТУСЫ ТРЕВОГ
     if any(x in raw_text for x in ["🔴", "🟢", "тривога", "відбій"]):
@@ -159,11 +169,9 @@ async def parser_handler(event):
     
     for line in lines:
         if len(line.strip()) < 5: continue
-        
         loc_name = clean_location_name(line)
         coords = await get_coords(loc_name)
         
-        # Резервный поиск по Харькову
         if not coords and "харків" in line.lower():
             coords = [49.9935, 36.2304, "Харків"]
 
@@ -171,8 +179,7 @@ async def parser_handler(event):
             targets_to_save.append({
                 "id": f"{event.id}_{uuid.uuid4().hex[:4]}",
                 "type": found_threat,
-                "lat": coords[0],
-                "lng": coords[1],
+                "lat": coords[0], "lng": coords[1],
                 "label": f"{SYMBOLS.get(found_threat, '❓')} | {coords[2]}",
                 "time": datetime.now().strftime("%H:%M"),
                 "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
@@ -181,18 +188,14 @@ async def parser_handler(event):
     if targets_to_save:
         targets = db('targets.json')
         if not isinstance(targets, list): targets = []
-        
-        # Удаляем старые записи этого же сообщения (чтобы не было дублей при редактировании)
         targets = [t for t in targets if not str(t.get('id', '')).startswith(str(event.id))]
         targets.extend(targets_to_save)
-        
         db('targets.json', targets)
-        logger.info(f"📍 Карта: {len(targets_to_save)} новых меток.")
+        logger.info(f"📍 Карта обновлена")
 
-# --- ЗАПУСК ---
 async def main():
     await client.start()
-    logger.info("🚀 БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ")
+    logger.info("🚀 Админ-бот запущен")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
