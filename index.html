@@ -3,23 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>ТАКТИЧНИЙ МОНІТОР v3.6</title>
-    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    
     <style>
         body { font-family: 'JetBrains Mono', monospace; background-color: #060705; overflow: hidden; }
-        .page { position: absolute; inset: 0; visibility: hidden; opacity: 0; pointer-events: none; }
-        .page.active { visibility: visible; opacity: 1; pointer-events: auto; }
+        .page { position: absolute; inset: 0; visibility: hidden; opacity: 0; }
+        .page.active { visibility: visible; opacity: 1; }
         #map { filter: brightness(0.6) contrast(1.2) saturate(0.5) hue-rotate(130deg); }
         .glass { background: rgba(15, 17, 12, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(74, 85, 43, 0.4); }
         .hud-border { border-left: 3px solid #f97316; }
         
+        /* Панель шарів */
         .leaflet-control-layers {
             background: rgba(28, 25, 23, 0.8) !important;
             backdrop-filter: blur(10px);
@@ -32,16 +31,6 @@
             margin-right: 12px !important; 
         }
         .leaflet-control-layers-toggle { filter: invert(1) hue-rotate(180deg); }
-        
-        /* Твоя оригінальна пульсація для ракет */
-        .threat-pulse {
-            animation: pulse-red 1.5s infinite;
-        }
-        @keyframes pulse-red {
-            0% { filter: drop-shadow(0 0 2px red); transform: scale(1); }
-            50% { filter: drop-shadow(0 0 10px red); transform: scale(1.1); }
-            100% { filter: drop-shadow(0 0 2px red); transform: scale(1); }
-        }
     </style>        
 </head>
 <body class="text-stone-300">
@@ -102,9 +91,9 @@
 
     <section id="page-logs" class="page bg-[#060705]">
         <header class="p-6 pt-16 border-b border-white/10">
-            <h2 class="text-xl font-black italic uppercase text-stone-500">Журнал_подій</h2>
+            <h2 class="text-xl font-black italic uppercase">Журнал_подій</h2>
         </header>
-        <div id="logs-container" class="p-4 space-y-2 text-[10px] font-mono overflow-y-auto h-[calc(100vh-160px)]"></div>
+        <div id="logs-container" class="p-4 space-y-2 text-[10px] font-mono"></div>
     </section>
 
     <section id="page-settings" class="page bg-[#060705]">
@@ -115,21 +104,21 @@
             <div class="glass p-4 flex justify-between items-center">
                 <span class="text-sm">Сповіщення про загрози</span>
                 <div id="toggle-missile" onclick="ui.toggleSetting('missileAlerts')" class="w-10 h-5 bg-stone-800 rounded-full flex items-center px-1 cursor-pointer transition-all">
-                    <div class="w-3 h-3 bg-white rounded-full transition-all" id="dot-missile"></div>
+                    <div class="w-3 h-3 bg-white rounded-full transition-all"></div>
                 </div>
             </div>
             
             <div class="glass p-4 flex justify-between items-center">
                 <span class="text-sm">Авто-фокус на ціль</span>
                 <div id="toggle-focus" onclick="ui.toggleSetting('autoFocus')" class="w-10 h-5 bg-stone-800 rounded-full flex items-center px-1 cursor-pointer transition-all">
-                    <div class="w-3 h-3 bg-white rounded-full transition-all" id="dot-focus"></div>
+                    <div class="w-3 h-3 bg-white rounded-full transition-all"></div>
                 </div>
             </div>
 
             <div class="glass p-4 space-y-4">
                 <div class="flex justify-between items-center">
                     <span class="text-sm font-bold">Радіус (км)</span>
-                    <input type="number" id="alert-radius" onchange="ui.updateRadius(this.value)" class="w-20 bg-stone-800 border border-orange-500 text-orange-500 text-center rounded p-1">
+                    <input type="number" id="alert-radius" class="w-20 bg-stone-800 border border-orange-500 text-orange-500 text-center rounded p-1">
                 </div>
                 <p class="text-[10px] opacity-60 italic">Сповіщення при наближенні об'єкта в цю зону.</p>
             </div>
@@ -140,5 +129,13 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="app.js"></script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js').catch(err => console.log('SW Failed', err));
+        });
+      }
+    </script>
 </body>
 </html>
