@@ -11,11 +11,11 @@ from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# --- НАСТРОЙКА ЛОГОВ ---
-logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
+# --- НАЛАШТУВАННЯ ЛОГІВ ---
+logging.basicConfig(format='[%(levelname)s] %(asctime)s: %(message)s', level=logging.INFO)
 logger = logging.getLogger("NEPTUN_CORE")
 
-# --- КОНФИГУРАЦИЯ ---
+# --- КОНФІГУРАЦІЯ ---
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "") 
@@ -40,10 +40,9 @@ SYMBOLS = {
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 db_lock = threading.Lock()
 
-# --- СИСТЕМНЫЕ ФУНКЦИИ ---
+# --- СИСТЕМНІ ФУНКЦІЇ ---
 
 def db_sync(file, data=None):
-    """Универсальная функция работы с БД и Git"""
     with db_lock:
         if data is None:
             if not os.path.exists(file): return [] if 'targets' in file else {}
@@ -51,7 +50,6 @@ def db_sync(file, data=None):
                 with open(file, 'r', encoding='utf-8') as f: return json.load(f)
             except: return [] if 'targets' in file else {}
         else:
-            # Фильтрация только для целей
             if 'targets' in file and isinstance(data, list):
                 now = datetime.now()
                 data = [t for t in data if datetime.fromisoformat(t.get('expire_at')) > now]
@@ -59,9 +57,8 @@ def db_sync(file, data=None):
             with open(file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"💾 {file} сохранен. Записей: {len(data) if isinstance(data, list) else 'dict'}")
+            logger.info(f"💾 {file} збережено. Записів: {len(data) if isinstance(data, list) else 'dict'}")
 
-            # Git в отдельном потоке, чтобы не вешать бота
             try:
                 subprocess.run(["git", "add", file], check=False, capture_output=True)
                 subprocess.run(["git", "commit", "-m", f"📡 {file} update"], check=False, capture_output=True)
@@ -69,7 +66,7 @@ def db_sync(file, data=None):
             except: pass
 
 async def get_coords(place):
-    if not place or len(place) < 3: return None
+    if not place or len(place.strip()) < 3: return None
     url = "https://nominatim.openstreetmap.org/search"
     params = {
         "q": f"{place}, Харківська область", "format": "json", "limit": 1,
@@ -82,7 +79,8 @@ async def get_coords(place):
             async with session.get(url, params=params, headers=headers, timeout=5) as resp:
                 data = await resp.json()
                 if data: return [float(data[0]["lat"]), float(data[0]["lon"]), data[0]["display_name"].split(',')[0]]
-    except: pass
+    except Exception as e:
+        logger.error(f"Geo Error: {e}")
     return None
 
 def get_threat_type(text):
@@ -90,7 +88,7 @@ def get_threat_type(text):
         "drone": ["шахед", "мопед", "shahed", "гербера"],
         "missile": ["ракета", "крилата", "балістика"],
         "kab": ["каб", "авіабомб", "фаб"],
-        "recon": ["розвідник", "supercam", "zala", "орлан"],
+        "recon": ["розвідник", "розвідувальні", "supercam", "zala", "орлан", "бпла"],
         "mrls": ["рсзо", "рсзв", "град", "ураган"],
         "s300": ["с300", "с-300"],
         "artillery": ["арта", "артилерія", "вихід"],
@@ -102,44 +100,46 @@ def get_threat_type(text):
         if any(k in text_lc for k in keys): return t_type
     return "unknown"
 
-# --- ОБРАБОТЧИКИ ---
+# --- ОБРОБНИКИ ---
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def retranslator(event):
-    """Ретрансляция из источников"""
+    """Крок 1: Копіювання повідомлень з джерел у ваш канал"""
     if not event.raw_text: return
-    keywords = ["харків", "область", "чугуїв", "куп", "бпла", "шахед", "каб", "ракета"]
+    keywords = ["харків", "область", "чугуїв", "куп", "бпла", "шахед", "каб", "ракета", "загроза"]
     if any(w in event.raw_text.lower() for w in keywords):
         try:
             await client.send_message(MY_CHANNEL, event.message)
-            logger.info("📩 Ретрансляция выполнена")
-        except: pass
+            logger.info("📩 Ретрансляція успішна")
+        except Exception as e:
+            logger.error(f"Forward error: {e}")
 
 @client.on(events.NewMessage(incoming=True))
 async def admin_panel(event):
-    """Админ-панель в личных сообщениях"""
+    """Адмін-панель у приватних повідомленнях бота"""
     if not event.is_private or event.sender_id not in ADMIN_IDS: return
     
     cmd = event.raw_text.lower().strip()
     if cmd == '/clear':
         db_sync('targets.json', [])
-        await event.respond("🧹 **Карта очищена!**")
+        await event.respond("🧹 **Карту очищено!**")
     elif cmd == '/info':
         t = db_sync('targets.json')
         a = db_sync('alerts.json')
         active = [k for k, v in a.items() if v.get('active')]
-        await event.respond(f"📊 **Метки:** {len(t)}\n🚨 **Тревоги:** {', '.join(active) if active else 'Нет'}")
+        await event.respond(f"📊 **Міток на карті:** {len(t)}\n🚨 **Активні тривоги:** {', '.join(active) if active else 'Немає'}")
 
 @client.on(events.NewMessage(chats=MY_CHANNEL))
 async def main_parser(event):
-    """Основной парсер канала"""
-    raw_text = event.raw_text
+    """Крок 2: Аналіз тексту у вашому каналі (включаючи переслані повідомлення)"""
+    # Важливо: беремо текст повідомлення або підпис до медіа
+    raw_text = event.raw_text or event.message.message or ""
     if not raw_text or raw_text.startswith('/'): return
     
-    logger.info(f"🔎 Анализ: {raw_text[:30]}...")
+    logger.info(f"🔎 Аналіз: {raw_text[:50].replace(os.linesep, ' ')}...")
     text_lc = raw_text.lower()
 
-    # 1. Тревоги
+    # 1. СТАТУСИ ТРИВОГ
     if any(x in raw_text for x in ["🔴", "🟢", "тривога", "відбій"]):
         alerts = db_sync('alerts.json')
         updated = False
@@ -150,23 +150,28 @@ async def main_parser(event):
         if updated: db_sync('alerts.json', alerts)
         return
 
-    # 2. Цели
+    # 2. ПОШУК ЦІЛЕЙ
     global_threat = get_threat_type(text_lc)
     new_targets = []
     
+    # Обробляємо кожен рядок окремо (для списків БПЛА)
     for line in raw_text.split('\n'):
-        if len(line.strip()) < 5: continue
+        clean_line = line.strip()
+        if len(clean_line) < 4: continue
         
-        # Очистка названия места
-        place = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|БПЛА|Ракета|КАБ|Шахед|Мопед|молнія|гербера)', '', line, flags=re.IGNORECASE).strip()
+        # Видаляємо сміття та цифри перед пошуком населеного пункту
+        place = re.sub(r'(\d+|🚨|⚠️|Увага|Рух|Вектор|Напрямок|Зафіксовано|Попередньо|БПЛА|Ракета|КАБ|Шахед|Мопед|молнія|гербера|н\.п\.|біля|нп)', '', clean_line, flags=re.IGNORECASE).strip()
         place = re.split(r'(курсом|на|в напрямку|через|в бік|в межах|повз|напрямок)', place, flags=re.IGNORECASE)[0].strip()
         place = re.sub(r'^(біля|в|у|район|селище|село|місто|смт|області|районі)\s+', '', place, flags=re.IGNORECASE).strip()
 
         coords = await get_coords(place)
-        if not coords and "харків" in line.lower(): coords = [49.9935, 36.2304, "Харків"]
+        
+        # Спроба для Харкова, якщо OSM не спрацював
+        if not coords and "харків" in clean_line.lower():
+            coords = [49.9935, 36.2304, "Харків"]
 
         if coords:
-            threat = get_threat_type(line)
+            threat = get_threat_type(clean_line)
             if threat == "unknown": threat = global_threat
             
             new_targets.append({
@@ -177,18 +182,19 @@ async def main_parser(event):
                 "time": datetime.now().strftime("%H:%M"),
                 "expire_at": (datetime.now() + timedelta(minutes=45)).isoformat()
             })
+            logger.info(f"✅ Знайдено ціль: {threat} -> {coords[2]}")
 
     if new_targets:
         targets = db_sync('targets.json')
-        # Удаляем старые метки этого же сообщения
-        targets = [t for t in targets if not t['id'].startswith(f"m{event.id}")]
+        # Оновлюємо базу, видаляючи старі мітки цього ж повідомлення
+        targets = [t for t in targets if not str(t.get('id', '')).startswith(f"m{event.id}")]
         targets.extend(new_targets)
         db_sync('targets.json', targets)
 
 # --- ЗАПУСК ---
 async def main():
     await client.start()
-    logger.info("🚀 СИСТЕМА ЗАПУЩЕНА")
+    logger.info("🚀 БОТ ЗАПУЩЕНИЙ І МОНІТОРИТЬ КАНАЛ")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
