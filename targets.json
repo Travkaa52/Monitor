@@ -35,5 +35,22 @@
         "location": "Вовчанськ"
       }
     ]
+  },
+  {
+    "target_id": "9a893f09",
+    "last_msg_id": 512,
+    "type": "kab",
+    "status": "moving",
+    "current_location": "Харків",
+    "lat": 49.9923181,
+    "lng": 36.2310146,
+    "expire_at": "2026-02-02T08:58:09.974930",
+    "history": [
+      {
+        "time": "08:38",
+        "action": "detected",
+        "location": "Харків"
+      }
+    ]
   }
 ]
