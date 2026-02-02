@@ -181,7 +181,7 @@ async def handler(event):
 )
 
 
-        if reply_id and not target:
+    if reply_id and not target:
             logger.warning("Reply without known target — ignored")
             return
 
@@ -268,5 +268,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
