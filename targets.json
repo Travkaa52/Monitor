@@ -15,5 +15,22 @@
         "location": "Вовчанськ"
       }
     ]
+  },
+  {
+    "target_id": "1a1528f2",
+    "last_msg_id": 516,
+    "type": "kab",
+    "status": "moving",
+    "current_location": "Куп’янськ",
+    "lat": 49.7132963,
+    "lng": 37.6141992,
+    "expire_at": "2026-02-02T09:03:34.480555",
+    "history": [
+      {
+        "time": "08:43",
+        "action": "detected",
+        "location": "Куп’янськ"
+      }
+    ]
   }
 ]
