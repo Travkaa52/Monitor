@@ -175,8 +175,11 @@ async def handler(event):
     coords = await geocode(location) if location else None
     status = detect_status(text)
 
-    async with state.lock:
-        target = next((t for t in state.targets if t["target_id"] == target_id), None)
+    target = next(
+    (t for t in state.targets if t.get("target_id") == target_id),
+    None
+)
+
 
         if reply_id and not target:
             logger.warning("Reply without known target — ignored")
@@ -265,4 +268,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
