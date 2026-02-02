@@ -18,5 +18,22 @@
     "count": 2,
     "time": "20:02",
     "expire_at": "2026-02-01T20:42:42.549254"
+  },
+  {
+    "target_id": "35493ef0",
+    "last_msg_id": 510,
+    "type": "kab",
+    "status": "moving",
+    "current_location": "Вовчанськ",
+    "lat": 50.2928843,
+    "lng": 36.9370028,
+    "expire_at": "2026-02-02T08:57:27.295914",
+    "history": [
+      {
+        "time": "08:37",
+        "action": "detected",
+        "location": "Вовчанськ"
+      }
+    ]
   }
 ]
