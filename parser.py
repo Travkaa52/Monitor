@@ -134,9 +134,7 @@ def detect_status(text):
     return "detected"
 
 # ---------------- GEO ----------------
-aiohttp_session = aiohttp.ClientSession(
-    headers={"User-Agent": "TacticalMonitor"}
-)
+aiohttp_session = None
 
 async def geocode(name):
     if not name:
@@ -250,13 +248,21 @@ async def janitor():
 
 # ---------------- ENTRY ----------------
 async def main():
+    global aiohttp_session
+
     subprocess.run(["git", "config", "--global", "user.name", "TacticalBot"], check=False)
     subprocess.run(["git", "config", "--global", "user.email", "bot@tactical.local"], check=False)
+
+    aiohttp_session = aiohttp.ClientSession(
+        headers={"User-Agent": "TacticalMonitor"}
+    )
 
     await client.start(bot_token=BOT_TOKEN)
     asyncio.create_task(janitor())
     logger.info("TACTICAL SYSTEM ONLINE")
     await client.run_until_disconnected()
 
+
 if __name__ == "__main__":
     asyncio.run(main())
+
