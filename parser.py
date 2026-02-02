@@ -43,23 +43,14 @@ THREAT_TYPES = {
     "missile": {"keywords": ["ракета", "пуск", "х-59", "х-31"], "icon": "img/missile.png", "label": "Ракета", "ttl": 15},
     "kab": {"keywords": ["каб", "авіабомб", "керована"], "icon": "img/kab.png", "label": "КАБ", "ttl": 25},
     "shahed": {"keywords": ["шахед", "шахєд", "герань", "мопед"], "icon": "img/drone.png", "label": "Шахед", "ttl": 45},
-    "gerbera": {"keywords": ["gerbera", "гербера"], "icon": "img/drone.png", "label": "Гербера", "ttl": 40},
-    "molniya": {"keywords": ["молнія", "молния"], "icon": "img/molniya.png", "label": "Молнія", "ttl": 30},
-    "lancet": {"keywords": ["ланцет"], "icon": "img/lancet.png", "label": "Ланцет", "ttl": 25},
     "recon": {"keywords": ["розвід", "орлан", "зала", "суперкам"], "icon": "img/recon.png", "label": "Розвідник", "ttl": 30},
-    "aviation": {"keywords": ["авіац", "міг-31", "ту-95", "су-34", "су-35"], "icon": "img/aircraft.png", "label": "Авіація", "ttl": 30},
-    "mrls": {"keywords": ["рсзв", "град", "ураган", "смерч"], "icon": "img/mrls.png", "label": "РСЗВ", "ttl": 15},
-    "air_defense": {"keywords": ["ппо", "працює", "вибух"], "icon": "img/images.png", "label": "ППО", "ttl": 10},
     "unknown": {"keywords": [], "icon": "img/unknown.png", "label": "Невідомо", "ttl": 20}
 }
 
 SOURCE_ZONES = {
     "КРИМ": {"keywords": ["крим", "криму", "джанкой"], "coords": [45.1, 34.1]},
-    "МОРЕ": {"keywords": ["моря", "морі", "акваторії"], "coords": [44.5, 33.0]},
     "БЄЛГОРОД": {"keywords": ["бєлгород", "белгород", "бнр"], "coords": [50.6, 36.6]},
-    "КУРСЬК": {"keywords": ["курськ", "курск"], "coords": [51.7, 36.2]},
-    "ЛУГАНСЬК": {"keywords": ["луганськ", "луганск"], "coords": [48.5, 39.3]},
-    "ДОНЕЦЬК": {"keywords": ["донецьк", "донецк"], "coords": [48.0, 37.8]}
+    "КУРСЬК": {"keywords": ["курськ", "курск"], "coords": [51.7, 36.2]}
 }
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -125,7 +116,9 @@ async def handle_my_channel(event):
     raw_text = event.raw_text
     text_lc = raw_text.lower()
     msg_id = event.id
-    reply_to = event.reply_to_msg_id
+    
+    # Витягуємо ID повідомлення, на яке відповіли
+    reply_to_id = event.reply_to.reply_to_msg_id if event.reply_to else None
 
     # 1. Очищення при відбої
     if any(k in text_lc for k in ["відбій", "чисто", "відміна"]):
@@ -134,39 +127,42 @@ async def handle_my_channel(event):
         logger.info("🧹 Карта очищена")
         return
 
-    # 2. Логіка Reply та пошук цілі
-    targets = db_sync('targets.json')
-    target_id = None
-    is_update = False
-
-    if reply_to in REPLY_MAP:
-        target_id = REPLY_MAP[reply_to]
-        is_update = True
-
-    # 3. Визначення типу та локації
+    # 2. Пошук координат
     loc_name = clean_location_name(raw_text)
     coords = await get_coords_online(loc_name) if loc_name else None
     
-    # 4. Джерело (Зони)
+    # Джерело за зоною
     source_zone = next((z for z, i in SOURCE_ZONES.items() if any(k in text_lc for k in i["keywords"])), None)
     if source_zone and not coords:
         coords = [SOURCE_ZONES[source_zone]["coords"][0], SOURCE_ZONES[source_zone]["coords"][1], source_zone]
 
-    if is_update:
-        # ОНОВЛЕННЯ ІСНУЮЧОЇ ЦІЛІ
+    targets = db_sync('targets.json')
+    target_id = None
+    is_update = False
+
+    # 3. ЛОГІКА ОНОВЛЕННЯ ЧЕРЕЗ REPLY
+    if reply_to_id and reply_to_id in REPLY_MAP:
+        target_id = REPLY_MAP[reply_to_id]
+        logger.info(f"🔗 Знайдено зв'язок: реплай на {reply_to_id} -> ціль {target_id}")
+        
         for t in targets:
             if t['id'] == target_id:
+                is_update = True
                 if coords:
                     t['lat'], t['lng'] = coords[0], coords[1]
-                    t['label'] = f"{t['label'].split('|')[0]} | {coords[2]}"
+                    t['label'] = f"{t['label'].split('|')[0].strip()} | {coords[2]}"
+                
                 t['time'] = datetime.now().strftime("%H:%M")
                 
-                # Якщо об'єкт зник
-                if any(k in text_lc for k in ["зник", "не фіксується", "мінус"]):
-                    t['expire_at'] = (datetime.now() + timedelta(minutes=5)).isoformat()
+                # Оновлюємо час життя, щоб об'єкт не зник передчасно
+                t['expire_at'] = (datetime.now() + timedelta(minutes=15)).isoformat()
+
+                if any(k in text_lc for k in ["зник", "мінус"]):
+                    t['expire_at'] = (datetime.now() + timedelta(minutes=2)).isoformat()
                 break
-    elif coords:
-        # СТВОРЕННЯ НОВОЇ ЦІЛІ
+
+    # 4. СТВОРЕННЯ НОВОЇ ЦІЛІ
+    if not is_update and coords:
         target_id = str(uuid.uuid4())[:8]
         threat_id = "unknown"
         for tid, info in THREAT_TYPES.items():
@@ -185,32 +181,14 @@ async def handle_my_channel(event):
             "expire_at": (datetime.now() + timedelta(minutes=THREAT_TYPES[threat_id]['ttl'])).isoformat()
         }
         targets.append(new_target)
+        logger.info(f"✨ Створено нову ціль {target_id}")
 
-    # Збереження
+    # 5. ЗБЕРЕЖЕННЯ ЗВ'ЯЗКУ
     if target_id:
         REPLY_MAP[msg_id] = target_id
         db_sync('targets.json', targets)
-        logger.info(f"✅ {'Оновлено' if is_update else 'Додано'} ціль {target_id}")
 
 # ================= СИСТЕМНІ ТАСКИ =================
-
-@client.on(events.NewMessage(chats=ADMIN_IDS, pattern='/admin'))
-async def admin_panel(event):
-    buttons = [
-        [Button.inline(f"{'🔴 STOP' if IS_PARSING_ENABLED else '🟢 START'} PARSING", b"toggle")],
-        [Button.inline("❌ CLEAR ALL", b"clear")]
-    ]
-    await event.respond("🛡 **ADMIN PANEL**", buttons=buttons)
-
-@client.on(events.CallbackQuery())
-async def callback_handler(event):
-    global IS_PARSING_ENABLED
-    if event.data == b"toggle":
-        IS_PARSING_ENABLED = not IS_PARSING_ENABLED
-        await event.edit(f"Parsing: {'🟢 ON' if IS_PARSING_ENABLED else '🔴 OFF'}")
-    elif event.data == b"clear":
-        db_sync('targets.json', [])
-        await event.answer("Targets cleared!")
 
 async def cleaner_task():
     while True:
@@ -220,12 +198,12 @@ async def cleaner_task():
         active = [t for t in targets if t.get('expire_at', '') > now]
         if len(active) != len(targets):
             db_sync('targets.json', active)
-            logger.info("🧹 Прибрано старі об'єкти")
+            logger.info("🧹 Авто-очищення застарілих цілей")
 
 async def main():
     await client.start(bot_token=BOT_TOKEN)
     asyncio.create_task(cleaner_task())
-    logger.info("🚀 Парсер запущено")
+    logger.info("🚀 Парсер v3.7 ONLINE")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
