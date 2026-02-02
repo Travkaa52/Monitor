@@ -2,7 +2,6 @@ import os
 import re
 import asyncio
 import json
-import threading
 import logging
 import subprocess
 import aiohttp
@@ -11,174 +10,253 @@ from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# Налаштування логів
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s: %(message)s')
-logger = logging.getLogger("NEPTUN_TACTICAL")
+# ---------------- LOGGING ----------------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
+logger = logging.getLogger("TACTICAL_ARCHITECT")
 
-# ================= КОНФІГУРАЦІЯ =================
+# ---------------- CONFIG ----------------
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "")
-ADMIN_IDS = [int(i.strip()) for i in os.getenv("ADMIN_IDS", "0").split(",") if i.strip().isdigit()]
+CHANNELS = [c.strip() for c in os.getenv("CHANNELS", "monitorkh1654").split(",")]
+GITHUB_REMOTE = os.getenv("GITHUB_REMOTE", "origin")
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 
-MY_CHANNEL = 'monitorkh1654'
-IS_PARSING_ENABLED = True
-
-# Пам'ять для зв'язків: {message_id: target_id}
-REPLY_MAP = {}
-
-THREAT_TYPES = {
-    "ballistics": {"keywords": ["баліст", "іскандер", "кинджал"], "icon": "img/ballistic.png", "label": "Балістика", "ttl": 15},
-    "missile": {"keywords": ["ракета", "пуск", "х-59"], "icon": "img/missile.png", "label": "Ракета", "ttl": 15},
-    "kab": {"keywords": ["каб", "авіабомб", "керована"], "icon": "img/kab.png", "label": "КАБ", "ttl": 25},
-    "shahed": {"keywords": ["шахед", "шахєд", "герань", "мопед"], "icon": "img/drone.png", "label": "Шахед", "ttl": 45},
-    "unknown": {"keywords": [], "icon": "img/unknown.png", "label": "Невідомо", "ttl": 20}
+# ---------------- THREATS ----------------
+THREAT_CONFIG = {
+    "ballistic": {"keywords": ["баліст", "іскандер", "кинджал", "кн-23", "с-300"], "ttl": 10},
+    "missile": {"keywords": ["ракета", "пуск", "х-59", "х-31", "калібр"], "ttl": 15},
+    "kab": {"keywords": ["каб", "авіабомб", "керована", "уаб"], "ttl": 20},
+    "shahed": {"keywords": ["шахед", "шахєд", "герань", "мопед", "бпла"], "ttl": 40},
+    "recon": {"keywords": ["орлан", "зала", "розвід"], "ttl": 30},
+    "unknown": {"keywords": [], "ttl": 15}
 }
 
-client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-db_lock = threading.Lock()
+STATUS_MAP = {
+    "detected": ["зафіксовано", "помічено", "виліт"],
+    "moving": ["курс", "рухається", "через", "на"],
+    "changed_direction": ["змінив", "розвернувся"],
+    "lost": ["зник", "не фіксується"],
+    "destroyed": ["мінус", "збито"]
+}
 
-# ================= СИСТЕМНІ ФУНКЦІЇ =================
+ACTION_MAP = {
+    "detected": "detected",
+    "moving": "move",
+    "changed_direction": "changed_direction",
+    "lost": "lost",
+    "destroyed": "destroyed"
+}
 
-def db_sync(file, data=None):
-    """Синхронізація з файлом та GitHub з примусовим оновленням"""
-    with db_lock:
-        if data is None:
-            if not os.path.exists(file): return []
-            try:
-                with open(file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    return json.loads(content) if content else []
-            except Exception as e:
-                logger.error(f"❌ Помилка читання JSON: {e}")
-                return []
-        else:
-            try:
-                # Атомарний запис
-                temp_file = f"{file}.tmp"
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                os.replace(temp_file, file)
-                
-                # Запуск Git у фоні
-                threading.Thread(target=git_push_force, daemon=True).start()
-            except Exception as e:
-                logger.error(f"❌ Помилка запису JSON: {e}")
+# ---------------- STATE ----------------
+class TacticalState:
+    def __init__(self):
+        self.targets = []
+        self.reply_map = {}
+        self.lock = asyncio.Lock()
+        self.file = "targets.json"
+        self.load()
 
-def git_push_force():
-    """Примусовий пуш для миттєвого оновлення фронтенду"""
-    try:
-        # Скидаємо можливі блокування Git
-        if os.path.exists(".git/index.lock"): os.remove(".git/index.lock")
-        
-        subprocess.run(["git", "add", "targets.json"], check=False)
-        subprocess.run(["git", "commit", "-m", "📡 Tactical Update"], check=False, capture_output=True)
-        # Використовуємо push --force, щоб GitHub стовідсотково прийняв зміни
-        subprocess.run(["git", "push", "--force"], check=False, capture_output=True)
-        logger.info("🚀 Дані відправлено на GitHub")
-    except Exception as e:
-        logger.error(f"❌ Git Error: {e}")
+    def load(self):
+        if not os.path.exists(self.file):
+            return
+        try:
+            with open(self.file, "r", encoding="utf-8") as f:
+                self.targets = json.load(f)
+                for t in self.targets:
+                    if "root_message_id" in t:
+                        self.reply_map[t["root_message_id"]] = t["target_id"]
+        except Exception as e:
+            logger.error(f"Load error: {e}")
+            self.targets = []
 
-# ================= ОБРОБКА ТЕКСТУ =================
+    async def sync(self):
+        async with self.lock:
+            temp = f"{self.file}.tmp"
+            with open(temp, "w", encoding="utf-8") as f:
+                json.dump(self.targets, f, ensure_ascii=False, indent=2)
+            os.replace(temp, self.file)
 
-def clean_location_name(text):
-    clean = re.sub(r'(🚨|⚠️|Увага|Рух|Вектор|Напрямок|БПЛА|Тип|Шахед|Ракета|Зафіксовано|Попередньо|!|\.)', ' ', text, flags=re.IGNORECASE).strip()
-    match = re.search(r'(?:курсом|на|в|через|бік|напрямок|біля|у бік|район)\s+([А-ЯІЇЄ][а-яіїє\']+)', clean, flags=re.IGNORECASE)
-    if match:
-        name = match.group(1).strip()
-        if name.endswith('у'): name = name[:-1] + 'а'
-        return name
+        proc = await asyncio.create_subprocess_exec(
+            "git", "status", "--porcelain",
+            stdout=subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        if not stdout.strip():
+            return
+
+        await asyncio.create_subprocess_exec("git", "add", self.file)
+        await asyncio.create_subprocess_exec(
+            "git", "commit", "-m", f"Tactical update {datetime.now():%H:%M:%S}"
+        )
+        await asyncio.create_subprocess_exec(
+            "git", "push", GITHUB_REMOTE, GITHUB_BRANCH, "--force"
+        )
+        logger.info("GitHub synced")
+
+state = TacticalState()
+
+# ---------------- UTILITIES ----------------
+def resolve_target_id(reply_map, reply_to_id):
+    seen = set()
+    cur = reply_to_id
+    while cur and cur not in seen:
+        seen.add(cur)
+        target = reply_map.get(cur)
+        if target:
+            return target
+        cur = None
     return None
 
-async def get_coords_online(place_name):
+def extract_location(text):
+    text = re.sub(r"[🚨⚠️!.]", " ", text)
+    m = re.search(r"(?:на|у|в|через|біля)\s+([А-ЯІЇЄ][а-яіїє']+)", text)
+    if m:
+        return m.group(1)
+    return None
+
+def detect_threat(text):
+    tl = text.lower()
+    for t, cfg in THREAT_CONFIG.items():
+        if any(k in tl for k in cfg["keywords"]):
+            return t
+    return "unknown"
+
+def detect_status(text):
+    tl = text.lower()
+    for s, keys in STATUS_MAP.items():
+        if any(k in tl for k in keys):
+            return s
+    return "detected"
+
+# ---------------- GEO ----------------
+aiohttp_session = aiohttp.ClientSession(
+    headers={"User-Agent": "TacticalMonitor"}
+)
+
+async def geocode(name):
+    if not name:
+        return None
     url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": f"{place_name}, Харківська область, Україна", "format": "json", "limit": 1}
-    headers = {"User-Agent": "TacticalParser_v4"}
+    params = {"q": f"{name}, Харківська область, Україна", "format": "json", "limit": 1}
     try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, params=params, timeout=5) as resp:
-                data = await resp.json()
-                if data: return [float(data[0]["lat"]), float(data[0]["lon"]), data[0]["display_name"].split(',')[0]]
-    except: return None
+        async with aiohttp_session.get(url, params=params, timeout=5) as r:
+            if r.status == 200:
+                d = await r.json()
+                if d:
+                    return float(d[0]["lat"]), float(d[0]["lon"]), d[0]["display_name"].split(",")[0]
+    except:
+        pass
+    return None
 
-# ================= ГОЛОВНИЙ ОБРОБНИК =================
+# ---------------- TELEGRAM ----------------
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-@client.on(events.NewMessage(chats=MY_CHANNEL))
-async def handle_my_channel(event):
-    global REPLY_MAP
-    if not IS_PARSING_ENABLED or not event.raw_text: return
-    
-    text_lc = event.raw_text.lower()
-    msg_id = event.id
-    reply_to_id = event.reply_to.reply_to_msg_id if event.reply_to else None
-
-    # Очищення
-    if any(k in text_lc for k in ["відбій", "чисто", "відміна"]):
-        db_sync('targets.json', [])
-        REPLY_MAP.clear()
-        logger.info("🧹 CLEAR MAP")
+@client.on(events.NewMessage(chats=CHANNELS))
+async def handler(event):
+    if not event.raw_text:
         return
 
-    # Завантажуємо поточні цілі
-    targets = db_sync('targets.json')
-    target_id = None
-    updated = False
+    text = event.raw_text
+    msg_id = event.id
+    reply_id = event.reply_to.reply_to_msg_id if event.reply_to else None
 
-    # ПЕРЕВІРКА REPLY (Найважливіше!)
-    if reply_to_id and reply_to_id in REPLY_MAP:
-        target_id = REPLY_MAP[reply_to_id]
-        logger.info(f"🔍 Спроба оновити ціль {target_id} (реплай на {reply_to_id})")
-        
-        for t in targets:
-            if t['id'] == target_id:
-                loc_name = clean_location_name(event.raw_text)
-                coords = await get_coords_online(loc_name) if loc_name else None
-                
-                if coords:
-                    t['lat'], t['lng'] = coords[0], coords[1]
-                    t['label'] = f"{t['label'].split('|')[0].strip()} | {coords[2]}"
-                
-                t['time'] = datetime.now().strftime("%H:%M")
-                t['expire_at'] = (datetime.now() + timedelta(minutes=20)).isoformat()
-                
-                if any(k in text_lc for k in ["зник", "мінус", "немає"]):
-                    t['expire_at'] = (datetime.now() + timedelta(seconds=30)).isoformat()
-                
-                updated = True
-                logger.info(f"✅ Ціль {target_id} ОНОВЛЕНО")
-                break
+    if any(x in text.lower() for x in ["відбій", "чисто"]):
+        async with state.lock:
+            state.targets = []
+            state.reply_map = {}
+        await state.sync()
+        return
 
-    # СТВОРЕННЯ НОВОЇ (якщо не оновили стару)
-    if not updated:
-        loc_name = clean_location_name(event.raw_text)
-        coords = await get_coords_online(loc_name) if loc_name else None
-        
-        if coords:
-            target_id = str(uuid.uuid4())[:8]
-            threat_id = next((tid for tid, info in THREAT_TYPES.items() if any(k in text_lc for k in info["keywords"])), "unknown")
-            
-            new_target = {
-                "id": target_id,
-                "type": threat_id,
-                "lat": coords[0], "lng": coords[1],
-                "label": f"{THREAT_TYPES[threat_id]['label']} | {coords[2]}",
-                "icon": THREAT_TYPES[threat_id]["icon"],
+    target_id = resolve_target_id(state.reply_map, reply_id)
+    location = extract_location(text)
+    coords = await geocode(location) if location else None
+    status = detect_status(text)
+
+    async with state.lock:
+        target = next((t for t in state.targets if t["target_id"] == target_id), None)
+
+        if reply_id and not target:
+            logger.warning("Reply without known target — ignored")
+            return
+
+        if target:
+            if coords:
+                target["lat"], target["lng"] = coords[:2]
+                target["current_location"] = coords[2]
+                if status == "detected":
+                    status = "moving"
+
+            target["status"] = status
+            target["history"].append({
                 "time": datetime.now().strftime("%H:%M"),
-                "expire_at": (datetime.now() + timedelta(minutes=THREAT_TYPES[threat_id]['ttl'])).isoformat()
+                "action": ACTION_MAP[status],
+                "location": target.get("current_location")
+            })
+
+            ttl = THREAT_CONFIG[target["type"]]["ttl"]
+            target["expire_at"] = (datetime.now() + timedelta(minutes=ttl)).isoformat()
+
+            if status in ("lost", "destroyed"):
+                target["expire_at"] = (datetime.now() + timedelta(seconds=30)).isoformat()
+
+        elif coords:
+            tid = str(uuid.uuid4())[:8]
+            ttype = detect_threat(text)
+            new = {
+                "target_id": tid,
+                "root_message_id": msg_id,
+                "type": ttype,
+                "status": status,
+                "current_location": coords[2],
+                "lat": coords[0],
+                "lng": coords[1],
+                "expire_at": (datetime.now() + timedelta(
+                    minutes=THREAT_CONFIG[ttype]["ttl"])).isoformat(),
+                "history": [{
+                    "time": datetime.now().strftime("%H:%M"),
+                    "action": "detected",
+                    "location": coords[2]
+                }]
             }
-            targets.append(new_target)
-            logger.info(f"✨ Створено НОВУ ціль {target_id}")
+            state.targets.append(new)
+            target_id = tid
 
-    # Фіксація у мапі та збереження
-    if target_id:
-        REPLY_MAP[msg_id] = target_id
-        db_sync('targets.json', targets)
+        if target_id:
+            state.reply_map[msg_id] = target_id
 
+    await state.sync()
+
+# ---------------- JANITOR ----------------
+async def janitor():
+    while True:
+        await asyncio.sleep(30)
+        now = datetime.now()
+        async with state.lock:
+            state.targets = [
+                t for t in state.targets
+                if datetime.fromisoformat(t["expire_at"]) > now
+            ]
+            active = {t["target_id"] for t in state.targets}
+            state.reply_map = {
+                k: v for k, v in state.reply_map.items()
+                if v in active
+            }
+        await state.sync()
+
+# ---------------- ENTRY ----------------
 async def main():
+    subprocess.run(["git", "config", "--global", "user.name", "TacticalBot"], check=False)
+    subprocess.run(["git", "config", "--global", "user.email", "bot@tactical.local"], check=False)
+
     await client.start(bot_token=BOT_TOKEN)
-    logger.info("🚀 PARSER V4 FULL FORCE ONLINE")
+    asyncio.create_task(janitor())
+    logger.info("TACTICAL SYSTEM ONLINE")
     await client.run_until_disconnected()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
