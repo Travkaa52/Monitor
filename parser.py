@@ -18,7 +18,7 @@ API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "")
-CHANNELS = [c.strip() for c in os.getenv("CHANNELS", "monitorkh1654,air_alert_ua,CXID").split(",")]
+CHANNELS = [c.strip() for c in os.getenv("CHANNELS", "monitorkh1654,cxidua,tlknewsua,radar_kharkov").split(",")]
 
 THREAT_CONFIG = {
     "lightning": {"keywords": ["блискавка", "lightning", "швидка ціль"], "ttl": 10},
@@ -273,3 +273,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt: 
         action_logger.info("[SYSTEM] Shutdown by operator.")
+
