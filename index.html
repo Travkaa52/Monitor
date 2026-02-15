@@ -25,7 +25,16 @@ function ensureDebugEl(){
 
 setInterval(async () => {
   try {
-    const response = await fetch('/targets');
+    // Додаємо timestamp, щоб GitHub не кешував старі дані
+    const response = await fetch(`./targets.json?t=${Date.now()}`); 
+    const data = await response.json();
+    if (typeof updateMapData === 'function' && map) {
+      updateMapData(data);
+    }
+  } catch (e) {
+    console.warn('[Viewer] fetch error:', e);
+  }
+}, 5000);
     const data = await response.json();
     if (typeof updateMapData === 'function' && map) {
       updateMapData(data);
