@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <script>
+  document.documentElement.classList.add('viewer-no-auth');
+</script>
+
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:; img-src 'self' https: data: blob:;">
+  <title>Sky Kharkiv Map — Viewer</title>
+
+  <script src="config.dev.js?v=20260206-15"></script>
+<script>
+/* ===== Polling: отримання цілей кожні 5с ===== */
+function ensureDebugEl(){
+  let el = document.getElementById('tgDebug');
+  if (!el && document.body) {
+    el = document.createElement('div');
+    el.id = 'tgDebug';
+    el.textContent = 'Загрузка...';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+setInterval(async () => {
+  try {
+    const response = await fetch('/targets');
+    const data = await response.json();
+    if (typeof updateMapData === 'function' && map) {
+      updateMapData(data);
+    }
+  } catch (e) {
+    console.warn('[Viewer] fetch error:', e);
+  }
+}, 5000);
+</script>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="favicon.png" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.js"></script>
+
+  <style>
+:root {
+  --panel-bg: rgba(8, 13, 18, 0.96);
+  --panel-text: #f4f7ff;
+  --route-main: #79ff9a;
+  --route-shadow: #020409;
+  --btn-primary: #2fbf71;
+  --card-bg: rgba(11, 17, 24, 0.96);
+  --card-border: rgba(123, 255, 171, 0.20);
+  --card-hover: rgba(123, 255, 171, 0.12);
+  --card-active: rgba(123, 255, 171, 0.20);
+  --glow:
+    drop-shadow(0 0 0.6px #ffb347)
+    drop-shadow(0 0 3px   #ffb347)
+    brightness(1.05)
+    contrast(1.05);
+  --map-overlay-br: brightness(1.06) contrast(1.05);
+}
+
+html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; font-family:system-ui,"Segoe UI",sans-serif; background:#0a0e14; color:var(--panel-text); }
+#map { position:relative; width:100vw; height:100vh; height:100dvh; background:#0a0e14; }
+.leaflet-container { background:#0a0e14 !important; }
+
+/* Радарна сітка */
+#map::before {
+  content:""; position:absolute; inset:0; pointer-events:none; z-index:8;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(123,255,171,0.06) 0px, rgba(123,255,171,0.06) 1px, transparent 1px, transparent 32px),
+    repeating-linear-gradient(90deg, rgba(123,255,171,0.06) 0px, rgba(123,255,171,0.06) 1px, transparent 1px, transparent 32px);
+  mix-blend-mode:soft-light; opacity:0.55;
+}
+#map::after {
+  content:""; position:absolute; inset:0; pointer-events:none; z-index:5;
+  background: radial-gradient(circle at 50% 50%, transparent 0%, transparent 55%, rgba(0,0,0,0.55) 100%);
+}
+.leaflet-pane, .leaflet-control-container { position:relative; z-index:9; }
+
+/* Статус-бар зверху */
+#statusBar {
+  position:absolute; top:10px; left:50%; transform:translateX(-50%);
+  padding:5px 14px; background:linear-gradient(135deg,rgba(5,10,16,0.95),rgba(8,14,22,0.95));
+  color:var(--panel-text); font:600 12px/1 system-ui; letter-spacing:.06em; text-transform:uppercase;
+  border-radius:999px; border:1px solid rgba(123,255,171,0.5);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.85), 0 8px 18px rgba(0,0,0,0.7);
+  z-index:1100; pointer-events:auto; cursor:pointer; backdrop-filter:blur(6px);
+  transition: box-shadow .2s, border-color .2s;
+}
+#statusBar:active { border-color:rgba(123,255,171,0.8); box-shadow:0 0 0 1px rgba(0,0,0,0.85), 0 0 12px rgba(123,255,171,0.3); }
+#statusBar::before { content:"■"; font-size:10px; margin-right:6px; color:#7bffab; text-shadow:0 0 4px #7bffab; }
+
+/* Toast для нових цілей */
+#newTargetToast {
+  position:fixed; top:56px; left:50%; transform:translateX(-50%) translateY(-120%);
+  padding:8px 18px; border-radius:12px;
+  background:linear-gradient(135deg,rgba(5,10,16,0.95),rgba(8,14,22,0.95));
+  color:#7bffab; font:600 13px/1.3 system-ui; letter-spacing:.03em;
+  border:1px solid rgba(123,255,171,0.45);
+  box-shadow:0 4px 20px rgba(0,0,0,0.6), 0 0 8px rgba(123,255,171,0.15);
+  z-index:1200; pointer-events:auto; cursor:pointer;
+  backdrop-filter:blur(8px);
+  opacity:0; transition: transform .35s cubic-bezier(.4,0,.2,1), opacity .35s;
+  white-space:nowrap;
+}
+#newTargetToast.show {
+  transform:translateX(-50%) translateY(0); opacity:1;
+}
+#newTargetToast::before { content:"⚠"; margin-right:6px; }
+
+/* Donate toast */
+#donateToast {
+  position:fixed; bottom:68px; right:16px; z-index:10002;
+  padding:10px 18px; border-radius:14px;
+  background:linear-gradient(135deg,rgba(10,14,20,0.92),rgba(18,22,30,0.92));
+  color:#ffc83c; font:600 13px/1.3 system-ui; letter-spacing:.02em;
+  border:1px solid rgba(255,200,60,0.35);
+  box-shadow:0 4px 20px rgba(0,0,0,0.5), 0 0 10px rgba(255,200,60,0.08);
+  pointer-events:auto; cursor:pointer; backdrop-filter:blur(8px);
+  opacity:0; transform:translateY(12px) scale(0.95);
+  transition: opacity .4s cubic-bezier(.4,0,.2,1), transform .4s cubic-bezier(.4,0,.2,1);
+  text-decoration:none; display:flex; align-items:center; gap:8px;
+  white-space:nowrap;
+}
+#donateToast.show {
+  opacity:1; transform:translateY(0) scale(1);
+}
+#donateToast .dt-icon { font-size:16px; }
+#donateToast .dt-close {
+  margin-left:6px; opacity:0.5; font-size:14px; transition:opacity .2s;
+}
+#donateToast .dt-close:hover { opacity:1; }
+@media (max-width:640px){
+  #donateToast { bottom:58px; right:12px; font-size:12px; padding:8px 14px; }
+}
+
+/* Дебаг-статус знизу */
+#tgDebug {
+  position:fixed; right:10px; bottom:10px; z-index:9999;
+  padding:6px 10px; border-radius:8px;
+  background:rgba(10,14,20,0.75); color:#e8f0ff;
+  font:600 12px/1.2 system-ui; border:1px solid rgba(255,255,255,0.15);
+  pointer-events:none;
+}
+
+/* Кнопка рецентру */
+.recenter-btn {
+  position:fixed; right:12px; bottom:58px; z-index:9999;
+  width:42px; height:42px; border-radius:10px;
+  border:1px solid rgba(121,255,154,0.35);
+  background:rgba(8,12,16,0.65); color:#79ff9a; cursor:pointer;
+  font-size:0; backdrop-filter:blur(4px);
+  box-shadow:0 6px 14px rgba(0,0,0,0.45);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2379ff9a' stroke-width='1.5'><circle cx='12' cy='12' r='7'/><line x1='12' y1='2' x2='12' y2='6'/><line x1='12' y1='18' x2='12' y2='22'/><line x1='2' y1='12' x2='6' y2='12'/><line x1='18' y1='12' x2='22' y2='12'/></svg>");
+  background-repeat:no-repeat; background-position:center;
+}
+.recenter-btn:active { transform:translateY(1px); }
+
+/* РСЗО підпис */
+.rszo-tag {
+  background:rgba(5,10,16,0.82); color:#f4f7ff;
+  border:1px solid rgba(255,60,80,0.55); border-radius:10px; padding:2px 7px;
+  font:700 11px/1 system-ui; letter-spacing:.04em; text-transform:uppercase;
+  box-shadow:0 0 0 1px rgba(0,0,0,0.8), 0 6px 12px rgba(0,0,0,0.55);
+  pointer-events:none; white-space:nowrap;
+}
+
+/* Іконки маркерів */
+.leaflet-marker-icon { filter:var(--glow); }
+.leaflet-overlay-pane canvas { filter:var(--map-overlay-br); }
+.drone-label { font-size:10px; padding:1px 4px; border-radius:4px; background:rgba(255,255,255,.55); color:#ff3; text-shadow:0 0 3px #000; pointer-events:none; }
+.drone-label.light { background:rgba(0,0,0,.55); color:#fff; text-shadow:0 0 2px #f33; }
+
+/* ===== Док підкладок карти (лівий верхній кут) ===== */
+.basemap-switcher { position:absolute; left:12px; top:12px; z-index:1100; }
+.bm-fab {
+  width:34px; height:34px; border-radius:999px; border:none; cursor:pointer;
+  font-size:18px; display:flex; align-items:center; justify-content:center;
+  background:var(--panel-bg); color:var(--panel-text);
+  box-shadow:0 4px 14px rgba(0,0,0,.35);
+}
+.bm-fab:hover { background:var(--card-hover); }
+.bm-panel {
+  position:absolute; left:0; top:42px; transform:translateY(8px);
+  opacity:0; pointer-events:none; transition:opacity .15s, transform .15s;
+  background:rgba(255,255,255,0.95); color:#1a1a1a;
+  border:1px solid rgba(0,0,0,0.15); border-radius:12px;
+  box-shadow:0 4px 14px rgba(0,0,0,.25); padding:8px 8px 6px;
+  max-width:280px; backdrop-filter:blur(6px);
+}
+.basemap-switcher.open .bm-panel, .basemap-switcher:hover .bm-panel {
+  opacity:1; transform:translateY(0); pointer-events:auto;
+}
+.bm-title { font:600 11px/1 system-ui; text-transform:uppercase; letter-spacing:.04em; color:#555; margin:0 0 4px 2px; }
+.bm-list { display:flex; flex-wrap:wrap; gap:6px; }
+.bm-item {
+  flex:1 1 120px; min-width:120px; max-width:100%; border-radius:10px;
+  border:1px solid rgba(0,0,0,0.12); background:rgba(245,245,245,0.9); color:#1a1a1a;
+  padding:6px 8px; text-align:left; cursor:pointer;
+  display:flex; flex-direction:column; gap:2px;
+  transition:background .15s, border-color .15s; font:400 12px/1.1 system-ui;
+}
+.bm-item:hover { background:rgba(230,230,230,0.95); }
+.bm-item.active { border-color:#0d6efd; background:rgba(220,235,255,0.95); box-shadow:0 0 0 2px rgba(13,110,253,.35) inset; }
+.bm-name { font-weight:600; font-size:12px; color:#1a1a1a; }
+.bm-sub { font-size:11px; color:#555; }
+
+/* Попап назви цілі */
+.target-popup .leaflet-popup-content-wrapper {
+  background:rgba(5,10,16,0.92); color:#f4f7ff; border:1px solid rgba(123,255,171,0.4);
+  border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,0.5); font:600 13px/1.2 system-ui;
+  padding:0;
+}
+.target-popup .leaflet-popup-content { margin:6px 10px; }
+.target-popup .leaflet-popup-tip { background:rgba(5,10,16,0.92); border:1px solid rgba(123,255,171,0.4); border-top:none; border-left:none; }
+
+/* Заглушка «Карта вимкнена» */
+#streamOffline {
+  display:none; position:fixed; inset:0; z-index:99999;
+  background:linear-gradient(160deg, #0a0e14 0%, #111820 50%, #0a0e14 100%);
+  flex-direction:column; align-items:center; justify-content:center; text-align:center;
+  padding:32px;
+}
+#streamOffline.visible { display:flex; }
+#streamOffline .offline-icon { font-size:64px; margin-bottom:20px; opacity:0.7; }
+#streamOffline h1 {
+  font:700 22px/1.3 system-ui; color:#ff6b6b; text-transform:uppercase;
+  letter-spacing:.08em; margin:0 0 16px;
+}
+#streamOffline p {
+  font:400 14px/1.6 system-ui; color:rgba(244,247,255,0.7);
+  max-width:360px; margin:0;
+}
+
+@media (max-width:640px) {
+  .basemap-switcher { left:8px; top:8px; }
+}
+
+/* ===== DONATE BUTTON ===== */
+#donateBtn{
+  position:fixed;bottom:16px;right:16px;z-index:10001;
+  height:42px;padding:0 16px;
+  border-radius:999px;border:1px solid rgba(255,200,60,0.45);
+  background:rgba(10,14,20,0.8);backdrop-filter:blur(8px);
+  color:#ffc83c;font:600 13px/1 system-ui;cursor:pointer;
+  display:flex;align-items:center;gap:8px;
+  transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,0.4);
+  text-decoration:none;
+}
+#donateBtn:hover{background:rgba(255,200,60,0.15);transform:scale(1.05)}
+#donateBtn .donate-icon{font-size:18px}
+#donateBtn .donate-label{letter-spacing:.03em}
+@media (max-width:640px){
+  #donateBtn{bottom:12px;right:12px;height:38px;padding:0 12px;font-size:12px}
+}
+
+/* ===== CHANGELOG BUTTON & MODAL ===== */
+#changelogBtn{
+  position:fixed;bottom:16px;left:16px;z-index:10001;
+  width:40px;height:40px;border-radius:50%;border:1px solid rgba(123,255,171,0.35);
+  background:rgba(10,14,20,0.75);backdrop-filter:blur(8px);
+  color:#7bffab;font-size:16px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,0.4);
+}
+#changelogBtn:hover{background:rgba(123,255,171,0.15);transform:scale(1.1)}
+
+#changelogOverlay{
+  display:none;position:fixed;inset:0;z-index:100002;
+  background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);
+  align-items:center;justify-content:center;padding:16px;
+}
+#changelogOverlay.open{display:flex}
+
+#changelogModal{
+  background:linear-gradient(135deg,#0d1117 0%,#161b22 100%);
+  border:1px solid rgba(123,255,171,0.2);border-radius:16px;
+  color:#e6edf3;width:100%;max-width:640px;max-height:85vh;
+  display:flex;flex-direction:column;
+  box-shadow:0 8px 40px rgba(0,0,0,0.6);overflow:hidden;
+}
+#changelogModal .cl-header{
+  padding:20px 24px 16px;border-bottom:1px solid rgba(123,255,171,0.12);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+#changelogModal .cl-header h2{
+  margin:0;font:700 18px/1.3 system-ui,sans-serif;color:#7bffab;
+  display:flex;align-items:center;gap:8px;
+}
+#changelogModal .cl-close{
+  background:none;border:none;color:#8b949e;font-size:22px;cursor:pointer;
+  width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+  border-radius:8px;transition:all .2s;
+}
+#changelogModal .cl-close:hover{background:rgba(255,255,255,0.1);color:#fff}
+#changelogModal .cl-body{
+  overflow-y:auto;padding:8px 24px 24px;flex:1;-webkit-overflow-scrolling:touch;
+}
+#changelogModal .cl-body::-webkit-scrollbar{width:4px}
+#changelogModal .cl-body::-webkit-scrollbar-thumb{background:rgba(123,255,171,0.2);border-radius:2px}
+
+.cl-group{margin-bottom:20px}
+.cl-group-title{
+  font:700 13px/1 system-ui;color:#7bffab;text-transform:uppercase;letter-spacing:.08em;
+  margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid rgba(123,255,171,0.1);
+  display:flex;align-items:center;gap:6px;
+}
+.cl-item{
+  padding:8px 12px;margin-bottom:6px;
+  background:rgba(255,255,255,0.03);border-radius:10px;
+  border-left:3px solid rgba(123,255,171,0.25);transition:background .2s;
+}
+.cl-item:hover{background:rgba(123,255,171,0.06)}
+.cl-item-title{font:600 13px/1.4 system-ui;color:#e6edf3;margin-bottom:2px}
+.cl-item-desc{font:400 12px/1.5 system-ui;color:#8b949e}
+.cl-version{
+  text-align:center;padding:12px 0 6px;
+  font:600 11px/1 system-ui;color:#484f58;letter-spacing:.06em;
+}
+/* ===== VIEWER COUNTER ===== */
+#viewerCounter{
+  position:fixed;bottom:64px;left:16px;z-index:10001;
+  display:flex;align-items:center;gap:6px;
+  padding:5px 12px 5px 10px;
+  border-radius:999px;
+  background:rgba(8,13,18,0.82);
+  backdrop-filter:blur(8px);
+  border:1px solid rgba(123,255,171,0.25);
+  box-shadow:0 2px 12px rgba(0,0,0,0.4);
+  font:600 12px/1 system-ui,sans-serif;
+  color:rgba(200,210,230,0.85);
+  pointer-events:none;
+  transition:opacity .4s;
+}
+#viewerCounter .vc-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:#7bffab;
+  box-shadow:0 0 6px rgba(123,255,171,0.6);
+  animation:vc-pulse 2s ease-in-out infinite;
+}
+@keyframes vc-pulse{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.5;transform:scale(.75)}
+}
+#viewerCounter .vc-num{
+  font-variant-numeric:tabular-nums;
+  color:#7bffab;
+  font-weight:700;
+}
+@media(max-width:640px){
+  #viewerCounter{bottom:56px;left:12px;padding:4px 10px 4px 8px;font-size:11px;gap:5px}
+  #viewerCounter .vc-dot{width:6px;height:6px}
+}
+@media(max-width:480px){
+  #viewerCounter{bottom:52px;left:12px}
+}
+
+@media(max-width:480px){
+  #changelogBtn{width:36px;height:36px;font-size:14px;bottom:12px;left:12px}
+  #changelogModal{max-height:90vh;border-radius:12px}
+  #changelogModal .cl-header{padding:16px 16px 12px}
+  #changelogModal .cl-header h2{font-size:15px}
+  #changelogModal .cl-body{padding:6px 16px 20px}
+  .cl-item{padding:6px 10px}
+  .cl-item-title{font-size:12px}
+  .cl-item-desc{font-size:11px}
+}
+  </style>
+</head>
+<body>
+
+<!-- Заглушка: карта вимкнена -->
+<div id="streamOffline">
+  <div class="offline-icon">📡</div>
+  <h1>Карту зараз вимкнено</h1>
+  <p>Карта працює в ручному режимі — цілі вносяться оператором вручну. Тому трансляція доступна лише тоді, коли адміністратор має можливість вести моніторинг.</p>
+</div>
+
+<button id="recenterBtn" class="recenter-btn" title="Центрувати на цілях"></button>
+
+<div id="map">
+  <div id="statusBar">⏱ --:-- • цілей 0</div>
+</div>
+<div id="newTargetToast"></div>
+
+<div id="basemapSwitcher" class="basemap-switcher"></div>
+
+<script>
+/* ===================== КОНФІГ ===================== */
+const DEFAULT_CONFIG = {
+  BASE_URL: (location.origin && location.origin !== 'null') ? location.origin : 'http://139.28.36.16:8000',
+  AUTH_URL: '/auth/login',
+  TARGETS_REST: '/targets',
+  CLIENT_WATERMARK: true,
+  WATERMARK_TEXT: '@SkyKh_info',
+  WM_FONT_ABS: 0.028,
+  WM_LOGO_PATH: 'Logo_SkyKh.jpg',
+  ICON_SCALE_BY_ZOOM: [[10,1.0],[12,1.2],[14,1.4],[16,1.65]],
+  ADMIN_PANEL_URL: 'https://admin.skykharkiv.online',
+};
+const APP_CONFIG = Object.assign({}, DEFAULT_CONFIG, (window.APP_CONFIG || {}));
+
+/* ===== resolveIconUrl ===== */
+const resolveIconUrl = (p) => {
+  if (!p) return p;
+  if (/^https?:\/\//i.test(p)) return p;
+  const base = (APP_CONFIG.BASE_URL || location.origin || '').replace(/\/$/, '');
+  const path = p.startsWith('/') ? p : `/${p}`;
+  return base ? (base + path) : path;
+};
+
+/* ===== Утиліти ===== */
+const pad2 = n => String(n).padStart(2, '0');
+
+/* ===== Іконки ===== */
+let ICON_PATHS = {
+  shahed: 'shahed.png', shaheds: 'shaheds.png', gerbera: 'gerbera.PNG',
+  orlan: 'orlan.png', lancet: 'lancet.png', zala: 'zala.png',
+  supercam: 'supercam.png', molniya: 'molniya.png',
+  rocket: 'rocket.png', kab: 'kab.png', explosion: 'Explosion.png',
+  rszo: 'rszo.png', balistika: 'balistika.png'
+};
+
+async function loadIconsFromAdmin() {
+  try {
+    const base = (location.origin || '').replace(/\/$/, '');
+    const resp = await fetch(base + '/api/icons', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const icons = data.icons || {};
+    if (!Object.keys(icons).length) return;
+    Object.entries(icons).forEach(([key, cfg]) => {
+      let path = cfg.path || cfg.file;
+      if (path) {
+        if (path.startsWith('/static/icons/') || path.startsWith('static/icons/')) {
+          ICON_PATHS[key] = base + (path.startsWith('/') ? path : '/' + path);
+        } else if (/^https?:\/\//i.test(path)) {
+          ICON_PATHS[key] = path;
+        } else {
+          ICON_PATHS[key] = path;
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('[Icons] Failed to load from admin:', e.message);
+  }
+}
+
+/* ===== Типи цілей ===== */
+const TYPES = [
+  ['shahed',28,45], ['gerbera',50,45], ['orlan',36,45], ['molniya',36,45], ['lancet',36,45],
+  ['kab',30,180], ['rocket',30,45], ['невідомий',36,0],
+  ['explosion',60,0], ['rszo',80,45], ['balistika',80,45]
+];
+const LABELS = {
+  shahed:'Шахед', orlan:'Розвід. БпЛА', molniya:'Молнія', lancet:'Ланцет',
+  kab:'КАБ', rocket:'Ракета', 'невідомий':'Невідомий', gerbera:'Гербера',
+  explosion:'Вибух / ураження', rszo:'РСЗО', balistika:'Балістика'
+};
+const SHORT = {
+  shahed:'Шахедів:', orlan:'Розвід.:', molniya:'Молній:', lancet:'Ланцетів:',
+  kab:'КАБів:', rocket:'Ракет:', 'невідомий':'Невід.:', gerbera:'Гербер:',
+  explosion:'Вибухів:', rszo:'РСЗО:', balistika:'Баліст.:'
+};
+
+/* ===== Глобальні змінні ===== */
+let map, drones = [], markersGroup = null, targetsById = {};
+let currentBaseMeta = { name: 'Google Рельєф', isDark: false };
+let currentBaseLayer = null, currentBaseIdx = 0;
+window.allTargets = [];
+
+/* ===== Відстеження нових цілей поза екраном ===== */
+let _knownTargetIds = new Set();
+let _toastTimer = null;
+
+function showNewTargetToast(count, typeSummary) {
+  const el = document.getElementById('newTargetToast');
+  if (!el) return;
+  el.textContent = `+${count} ${count === 1 ? 'нова ціль' : (count < 5 ? 'нових цілі' : 'нових цілей')}${typeSummary ? ' • ' + typeSummary : ''} ↗`;
+  el.classList.add('show');
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.classList.remove('show'); }, 4500);
+}
+
+function hideNewTargetToast() {
+  const el = document.getElementById('newTargetToast');
+  if (el) el.classList.remove('show');
+  if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+}
+
+/* ===== Базові шари ===== */
+const googleTerrain = L.tileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', { maxZoom: 19, attribution: '© Google' });
+const googleRoads = L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', { maxZoom: 19, attribution: '© Google' });
+const googleHybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', { maxZoom: 19, attribution: '© Google' });
+const cartoPositron = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '© CARTO' });
+const cartoDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '© CARTO' });
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OSM' });
+
+const BASE_LAYERS = [
+  { name: 'Google Рельєф', layer: googleTerrain, isDark: false },
+  { name: 'Google Дороги', layer: googleRoads, isDark: false },
+  { name: 'Google Гібрид', layer: googleHybrid, isDark: true },
+  { name: 'CARTO Світла', layer: cartoPositron, isDark: false },
+  { name: 'CARTO Темна', layer: cartoDark, isDark: true },
+  { name: 'OSM Стандарт', layer: osm, isDark: false }
+];
+
+const canvasRenderer = L.canvas({ padding: 0.5 });
+
+/* ===== Анімація (rAF) ===== */
+const anims = new Set();
+let sectorPulsePhase = 0;
+const ANIM_MS = 14000;
+function startAnimFor(d, A, B) { d._animData = { A, B, started: performance.now() }; anims.add(d); }
+function stopAnimFor(d) { anims.delete(d); d._animData = null; }
+function tick() {
+  const now = performance.now();
+  for (const d of anims) {
+    const { A, B, started } = d._animData || {};
+    if (!A || !B) continue;
+    const p = ((now - started) % ANIM_MS) / ANIM_MS;
+    d.marker.setLatLng([A.lat + (B.lat - A.lat) * p, A.lng + (B.lng - A.lng) * p]);
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ===== Геоутиліти ===== */
+function scaleForZoom(z) {
+  const table = APP_CONFIG.ICON_SCALE_BY_ZOOM || [];
+  let mult = 1;
+  for (const [zz, m] of table) { if (z >= zz) mult = m; }
+  if (currentBaseMeta.isDark) mult *= 1.08;
+  return mult;
+}
+
+function sectorRadiusByZoom(baseRadius, baseZoom = 10) {
+  return baseRadius * Math.pow(1.7, baseZoom - map.getZoom());
+}
+
+function icon(name, size) {
+  const s = Math.round((size || 36) * scaleForZoom(map.getZoom()));
+  const url = resolveIconUrl(ICON_PATHS[name] || `${name}.png`);
+  return L.icon({ iconUrl: url, iconSize: [s, s], iconAnchor: [s / 2, s / 2] });
+}
+
+function refreshIconsByZoom() {
+  const z = map.getZoom();
+  drones.forEach(d => {
+    if (!d) return;
+    d.marker.setIcon(icon(d.iconT || d.type || 'shahed', d.baseSize || 36));
+    if (d.ring) d.ring.setRadius((d.baseSize || 36) * scaleForZoom(z) * 0.32);
+  });
+}
+
+function bearing(a, b) {
+  const r = Math.PI / 180, dλ = (b.lng - a.lng) * r;
+  const y = Math.sin(dλ) * Math.cos(b.lat * r);
+  const x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos(dλ);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function dest(pt, brg, dist) {
+  const R = 6371000, δ = dist / R, θ = brg * Math.PI / 180;
+  const φ1 = pt.lat * Math.PI / 180, λ1 = pt.lng * Math.PI / 180;
+  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.cos(φ2));
+  return L.latLng(φ2 * 180 / Math.PI, (λ2 * 180 / Math.PI + 540) % 360 - 180);
+}
+
+function getEndpoint(lat, lon, bearingDeg, distKm = 15) {
+  const R = 6371, ad = distKm / R;
+  const la1 = lat * Math.PI / 180, lo1 = lon * Math.PI / 180, br = bearingDeg * Math.PI / 180;
+  const la2 = Math.asin(Math.sin(la1) * Math.cos(ad) + Math.cos(la1) * Math.sin(ad) * Math.cos(br));
+  const lo2 = lo1 + Math.atan2(Math.sin(br) * Math.sin(ad) * Math.cos(la1), Math.cos(ad) - Math.sin(la1) * Math.sin(la2));
+  return [la2 * 180 / Math.PI, lo2 * 180 / Math.PI];
+}
+
+/* ===== РСЗО: підпис + сектор ===== */
+function ensureRszoLabel(d) {
+  if (!d || d.type !== 'rszo') return;
+  const brg = (typeof d.lastBearing === 'number') ? d.lastBearing : 0;
+  const side = (brg >= 0 && brg <= 180) ? 'left' : 'right';
+  const offset = (side === 'left') ? L.point(-26, 0) : L.point(26, 0);
+  const txt = (typeof d.lastBearing === 'number') ? `РСЗО • ${Math.round(d.lastBearing)}°` : 'РСЗО';
+  const opts = { permanent: true, interactive: false, className: 'rszo-tag', direction: side, offset, opacity: 0.95 };
+  if (!d.rszoLabel) {
+    d.rszoLabel = L.tooltip(opts).setContent(txt);
+    d.marker.bindTooltip(d.rszoLabel).openTooltip();
+  } else {
+    d.rszoLabel.setContent(txt);
+    d.rszoLabel.options.direction = side;
+    d.rszoLabel.options.offset = offset;
+    d.marker.unbindTooltip();
+    d.marker.bindTooltip(d.rszoLabel).openTooltip();
+  }
+}
+
+function buildSectorLatLngs(center, bearingDeg, radiusMeters, halfAngleDeg, steps = 28) {
+  const pts = [center];
+  const start = bearingDeg - halfAngleDeg, end = bearingDeg + halfAngleDeg;
+  for (let i = 0; i <= steps; i++) pts.push(dest(center, start + (end - start) * (i / steps), radiusMeters));
+  pts.push(center);
+  return pts;
+}
+
+function drawSectorZone(d) {
+  if (!d.sectorCfg) return;
+  const cfg = d.sectorCfg, center = d.marker.getLatLng();
+  const radius = sectorRadiusByZoom(cfg.baseRadius, cfg.baseZoom);
+  if (d.zoneLayer) map.removeLayer(d.zoneLayer);
+  const leftPt = dest(center, cfg.bearing - cfg.halfA, radius);
+  const rightPt = dest(center, cfg.bearing + cfg.halfA, radius);
+  d.zoneLayer = L.layerGroup([
+    L.polyline([center, leftPt], { renderer: canvasRenderer, color: '#ff0033', weight: 2, opacity: 0.7, interactive: false }),
+    L.polyline([center, rightPt], { renderer: canvasRenderer, color: '#ff0033', weight: 2, opacity: 0.7, interactive: false })
+  ]).addTo(map);
+}
+
+function redrawAllSectors() { drones.forEach(d => { if (d?.sectorCfg) drawSectorZone(d); }); }
+function pulseSectors() {
+  sectorPulsePhase += 0.04;
+  const a = 0.45 + Math.sin(sectorPulsePhase) * 0.25;
+  drones.forEach(d => { if (d?.zoneLayer) d.zoneLayer.eachLayer(l => { if (l instanceof L.Polyline) l.setStyle({ opacity: a }); }); });
+  requestAnimationFrame(pulseSectors);
+}
+
+/* ===== Візуал ===== */
+function recolorLabels() {
+  const dark = currentBaseMeta.isDark;
+  document.querySelectorAll('.drone-label').forEach(t => t.classList.toggle('light', !dark));
+}
+function recolorRoutes() {}
+
+/* ===== Статус-бар ===== */
+function buildAutoCaption() {
+  const counts = {};
+  drones.forEach(d => { if (d) counts[d.type] = (counts[d.type] || 0) + 1; });
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (!total) return '';
+  return `Цілей ${total}: ` + Object.entries(counts).map(([t, q]) => `${SHORT[t] || t} ${q}`).join(' | ');
+}
+
+function updateStatus() {
+  const now = new Date();
+  const text = `⏱ ${pad2(now.getHours())}:${pad2(now.getMinutes())} • ${buildAutoCaption() || 'Цілей 0'}`;
+  const el = document.getElementById('statusBar');
+  if (el) el.textContent = text;
+}
+
+/* ===== Оновлення цілей з сервера ===== */
+function updateMapData(data) {
+  if (!map) return;
+  const items = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+  window.allTargets = items;
+
+  const seen = new Set();
+  items.forEach(item => {
+    const lat = parseFloat(item.lat), lon = parseFloat(item.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+    const id = item.id || `${item.type || 't'}:${lat},${lon}`;
+    seen.add(id);
+
+    const t = item.type || "shahed";
+    const meta = TYPES.find(x => x[0] === t);
+    const size = meta?.[1] || 36, rotOffset = meta?.[2] ?? 45;
+    const icn = icon(t, size);
+
+    // Bearing
+    let brg = null;
+    if (typeof item.bearing === 'number') brg = item.bearing;
+    else if (typeof item.course === 'number') brg = item.course;
+    else if (typeof item.angle === 'number') brg = item.angle;
+    else if (item.vector) {
+      let vx, vy;
+      if (Array.isArray(item.vector) && item.vector.length >= 2) { vx = parseFloat(item.vector[0]); vy = parseFloat(item.vector[1]); }
+      else if (typeof item.vector === 'object') { vx = parseFloat(item.vector.x ?? item.vector.dx); vy = parseFloat(item.vector.y ?? item.vector.dy); }
+      if (Number.isFinite(vx) && Number.isFinite(vy)) brg = (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
+    }
+
+    let d = targetsById[id];
+
+    if (!d) {
+      // Новий маркер
+      let marker;
+      if (typeof L.rotatedMarker === 'function') {
+        marker = L.rotatedMarker([lat, lon], { icon: icn, rotationAngle: brg !== null ? (brg - rotOffset) : 0, rotationOrigin: 'center', pane: 'targetsPane' });
+      } else {
+        marker = L.marker([lat, lon], { icon: icn, pane: 'targetsPane', rotationOrigin: 'center center' });
+      }
+      if (markersGroup) markersGroup.addLayer(marker); else marker.addTo(map);
+
+      const shadow = L.polyline([], { color: '#000', weight: 4, opacity: 0.25, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(markersGroup || map);
+      const line = L.polyline([], { color: '#ff2a2a', weight: 1.4, opacity: 0.9, interactive: false, lineCap: 'butt', lineJoin: 'round' }).addTo(markersGroup || map);
+
+      // Попап з назвою цілі та описом при натисканні
+      const label = LABELS[t] || t;
+      const desc = item.description || '';
+      const popupHtml = desc ? `<b>${label}</b><div style="margin-top:4px;font-weight:400;opacity:0.85">${desc}</div>` : `<b>${label}</b>`;
+      marker.bindPopup(popupHtml, { closeButton: false, className: 'target-popup', offset: [0, -8] });
+
+      d = { id, type: t, iconT: t, baseSize: size, rotOffset, marker, shadow, line, lastBearing: brg, courseLine: null, points: [L.latLng(lat, lon)], description: desc };
+      targetsById[id] = d;
+      drones.push(d);
+    } else {
+      // Оновлення
+      const newPt = L.latLng(lat, lon);
+      d.marker.setLatLng(newPt);
+      d.points.push(newPt);
+      if (d.line) d.line.setLatLngs(d.points);
+      if (d.shadow) d.shadow.setLatLngs(d.points);
+      if (brg !== null && d.type !== 'rszo') d.marker.setRotationAngle?.(brg - d.rotOffset);
+      const typeChanged = d.type !== t;
+      if (typeChanged) { d.marker.setIcon(icn); d.type = t; d.iconT = t; d.baseSize = size; d.rotOffset = rotOffset; }
+      // Оновлюємо опис і попап
+      const newDesc = item.description || '';
+      if (newDesc !== d.description || typeChanged) {
+        d.description = newDesc;
+        const lbl = LABELS[d.type] || d.type;
+        d.marker.setPopupContent(newDesc ? `<b>${lbl}</b><div style="margin-top:4px;font-weight:400;opacity:0.85">${newDesc}</div>` : `<b>${lbl}</b>`);
+      }
+      d.lastBearing = brg;
+    }
+
+    // РСЗО: сектор (лінії) — якщо є bearing
+    if (d.type === 'rszo' && brg !== null) {
+      d.sectorCfg = { baseRadius: 14000, baseZoom: 10, halfA: 18, bearing: brg };
+      drawSectorZone(d);
+      ensureRszoLabel(d);
+    }
+
+    // Лінія курсу (зелена пунктирна) — для НЕ-РСЗО цілей
+    if (d.courseLine) { map.removeLayer(d.courseLine); d.courseLine = null; }
+    let end = null;
+    const ptA = L.latLng(lat, lon);
+    if (item.vector) {
+      if (Array.isArray(item.vector) && item.vector.length >= 2) { const vlat = parseFloat(item.vector[0]), vlon = parseFloat(item.vector[1]); if (Number.isFinite(vlat) && Number.isFinite(vlon)) end = [vlat, vlon]; }
+      else if (typeof item.vector === 'object') { const vlat = parseFloat(item.vector.lat ?? item.vector.y ?? item.vector.dy), vlon = parseFloat(item.vector.lon ?? item.vector.x ?? item.vector.dx); if (Number.isFinite(vlat) && Number.isFinite(vlon)) end = [vlat, vlon]; }
+    }
+    if (!end && brg !== null) end = getEndpoint(lat, lon, brg, 15);
+    if (end) d.courseLine = L.polyline([[lat, lon], [end[0], end[1]]], { color: '#79ff9a', weight: 2, dashArray: '5, 10', opacity: 0.6, interactive: false }).addTo(markersGroup || map);
+  });
+
+  // Видаляємо відсутні цілі
+  Object.keys(targetsById).forEach(id => {
+    if (seen.has(id)) return;
+    const d = targetsById[id];
+    [d?.marker, d?.shadow, d?.line, d?.courseLine, d?.zoneLayer, d?.rszoLabel].forEach(l => { if (l) { map.removeLayer(l); if (markersGroup) markersGroup.removeLayer(l); } });
+    delete targetsById[id];
+    drones = drones.filter(x => x && x.id !== id);
+  });
+
+  // Виявлення нових цілей поза видимою областю
+  if (_knownTargetIds.size > 0) {
+    const bounds = map.getBounds();
+    const newOutside = [];
+    for (const item of items) {
+      const lat = parseFloat(item.lat), lon = parseFloat(item.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const id = item.id || `${item.type || 't'}:${lat},${lon}`;
+      if (!_knownTargetIds.has(id) && !bounds.contains([lat, lon])) {
+        newOutside.push(item.type || 'shahed');
+      }
+    }
+    if (newOutside.length > 0) {
+      const typeCounts = {};
+      newOutside.forEach(t => { typeCounts[t] = (typeCounts[t] || 0) + 1; });
+      const summary = Object.entries(typeCounts).map(([t, q]) => `${LABELS[t] || t} ${q}`).join(', ');
+      showNewTargetToast(newOutside.length, summary);
+    }
+  }
+  // Оновлюємо відомі ID
+  _knownTargetIds = new Set(seen);
+
+  updateStatus();
+}
+
+function recenterTargets() {
+  const items = Array.isArray(window.allTargets) ? window.allTargets : [];
+  if (items.length) {
+    const coords = items.map(it => [parseFloat(it.lat), parseFloat(it.lon)]).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    coords.push([49.9935, 36.2304]);
+    if (coords.length) { map.flyToBounds(coords, { padding: [50, 50], maxZoom: 12 }); return; }
+  }
+  map.flyTo([49.9935, 36.2304], 11);
+}
+
+/* ===== Ініціалізація карти ===== */
+function initApp() {
+  if (window.mapInitialized) return;
+  window.mapInitialized = true;
+
+  map = L.map('map', { center: [49.9, 36.3], zoom: 10, preferCanvas: true, zoomControl: false });
+  map.createPane('targetsPane');
+  map.getPane('targetsPane').style.zIndex = 650;
+  markersGroup = L.featureGroup({ pane: 'targetsPane' }).addTo(map);
+
+  // Початкове завантаження цілей
+  setTimeout(async () => {
+    try {
+      const resp = await fetch('/targets');
+      const data = await resp.json();
+      if (typeof updateMapData === 'function') updateMapData(data);
+    } catch (e) { console.error('Initial targets fetch failed:', e); }
+  }, 500);
+
+  BASE_LAYERS[0].layer.addTo(map);
+  currentBaseLayer = BASE_LAYERS[0].layer;
+  currentBaseIdx = 0;
+
+  requestAnimationFrame(tick);
+  requestAnimationFrame(pulseSectors);
+
+  buildBasemapSwitcher();
+
+  // Кнопка підкладок
+  const sw = document.getElementById('basemapSwitcher');
+  if (sw) {
+    const bmFab = sw.querySelector('.bm-fab');
+    if (bmFab) bmFab.addEventListener('click', e => { e.stopPropagation(); sw.classList.toggle('open'); });
+    document.addEventListener('click', e => { if (!sw.contains(e.target)) sw.classList.remove('open'); });
+  }
+
+  // Рецентр
+  const recenterBtn = document.getElementById('recenterBtn');
+  if (recenterBtn) recenterBtn.onclick = () => recenterTargets();
+
+  // Натискання на статус-бар → показати всі цілі
+  const statusBar = document.getElementById('statusBar');
+  if (statusBar) statusBar.onclick = () => recenterTargets();
+
+  // Натискання на toast → показати всі цілі + сховати toast
+  const toast = document.getElementById('newTargetToast');
+  if (toast) toast.onclick = () => { hideNewTargetToast(); recenterTargets(); };
+
+  L.control.scale({ imperial: false, metric: true, maxWidth: 120 }).addTo(map);
+  document.body.classList.toggle('dark-map', BASE_LAYERS[0].isDark);
+
+  map.on('zoomend', () => { refreshIconsByZoom(); redrawAllSectors(); });
+}
+
+/* ===== Док підкладок ===== */
+function buildBasemapSwitcher() {
+  const sw = document.getElementById('basemapSwitcher');
+  if (!sw) return;
+  sw.innerHTML = '';
+
+  const fab = document.createElement('button');
+  fab.type = 'button'; fab.className = 'bm-fab'; fab.textContent = '🗺'; fab.title = 'Підкладка карти';
+  sw.appendChild(fab);
+
+  const panel = document.createElement('div');
+  panel.className = 'bm-panel';
+  sw.appendChild(panel);
+
+  const title = document.createElement('div');
+  title.className = 'bm-title'; title.textContent = 'Підкладка карти';
+  panel.appendChild(title);
+
+  const list = document.createElement('div');
+  list.className = 'bm-list';
+  panel.appendChild(list);
+
+  BASE_LAYERS.forEach((meta, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'bm-item'; btn.dataset.idx = String(idx);
+    btn.innerHTML = `<div class="bm-name">${meta.name}</div><div class="bm-sub">${meta.isDark ? 'темна' : 'світла'}</div>`;
+    if (idx === 0) btn.classList.add('active');
+    list.appendChild(btn);
+  });
+
+  list.addEventListener('click', e => {
+    const btn = e.target.closest('.bm-item');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx, 10);
+    const meta = BASE_LAYERS[idx];
+    if (!meta || meta.layer === currentBaseLayer) return;
+    if (currentBaseLayer && map.hasLayer(currentBaseLayer)) map.removeLayer(currentBaseLayer);
+    meta.layer.addTo(map);
+    currentBaseLayer = meta.layer; currentBaseIdx = idx;
+    list.querySelectorAll('.bm-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentBaseMeta = { name: meta.name, isDark: meta.isDark };
+    document.body.classList.toggle('dark-map', meta.isDark);
+    recolorLabels(); recolorRoutes(); refreshIconsByZoom(); redrawAllSectors();
+  });
+}
+
+/* ===== Перевірка статусу трансляції ===== */
+let streamActive = true;
+const ADMIN_BASE = location.origin || '';
+
+async function checkStreamStatus() {
+  try {
+    const resp = await fetch(ADMIN_BASE.replace(/\/$/, '') + '/api/stream/status', { cache: 'no-store' });
+    if (!resp.ok) return; // при ошибке не блокируем
+    const data = await resp.json();
+    streamActive = !!data.active;
+  } catch (e) {
+    // при ошибке сети — не блокируем, показываем карту
+    streamActive = true;
+  }
+  const overlay = document.getElementById('streamOffline');
+  if (overlay) overlay.classList.toggle('visible', !streamActive);
+}
+
+/* ===== Запуск ===== */
+(async () => {
+  await checkStreamStatus();
+  if (streamActive) {
+    await loadIconsFromAdmin();
+    initApp();
+  }
+  // Перевіряємо статус кожні 15 секунд
+  setInterval(async () => {
+    const wasBefore = streamActive;
+    await checkStreamStatus();
+    // Якщо трансляцію щойно увімкнули — ініціалізуємо карту
+    if (streamActive && !wasBefore) {
+      await loadIconsFromAdmin();
+      initApp();
+    }
+  }, 15000);
+})();
+</script>
+
+<!-- ===== CHANGELOG BUTTON + MODAL ===== -->
+<a id="donateBtn" href="https://send.monobank.ua/jar/7nLEDMfuNF" target="_blank" rel="noopener" title="Підтримати проєкт">
+  <span class="donate-icon">🫙</span>
+  <span class="donate-label">Донат</span>
+</a>
+<a id="donateToast" href="https://send.monobank.ua/jar/7nLEDMfuNF" target="_blank" rel="noopener">
+  <span class="dt-icon">❤️</span>
+  <span class="dt-text">Підтримайте проєкт</span>
+  <span class="dt-close" onclick="event.preventDefault();event.stopPropagation();closeDonateToast()">✕</span>
+</a>
+
+<div id="viewerCounter"><span class="vc-dot"></span><span class="vc-num">—</span><span class="vc-label">онлайн</span></div>
+
+<button id="changelogBtn" title="Оновлення проєкту">🔄</button>
+
+<div id="changelogOverlay">
+  <div id="changelogModal">
+    <div class="cl-header">
+      <h2>📋 Журнал оновлень</h2>
+      <button class="cl-close" id="clClose">&times;</button>
+    </div>
+    <div class="cl-body">
+
+      <div class="cl-group">
+        <div class="cl-group-title">🗺️ Карта</div>
+        <div class="cl-item"><div class="cl-item-title">Інтерактивна карта загроз</div><div class="cl-item-desc">Повноцінна онлайн-карта з центром на Харкові для відстеження повітряних загроз у реальному часі</div></div>
+        <div class="cl-item"><div class="cl-item-title">Вибір підкладки</div><div class="cl-item-desc">6 варіантів відображення карти — супутникова, дорожня, рельєфна та інші, з можливістю перемикання</div></div>
+        <div class="cl-item"><div class="cl-item-title">Стилізований інтерфейс</div><div class="cl-item-desc">Сучасний тактичний дизайн з темною темою, зручний для використання вдень та вночі</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">🎯 Відстеження загроз</div>
+        <div class="cl-item"><div class="cl-item-title">11 типів цілей</div><div class="cl-item-desc">Шахеди, ракети, КАБи, РСЗО, балістика, розвідувальні дрони та інші — кожен тип із власною іконкою</div></div>
+        <div class="cl-item"><div class="cl-item-title">Позначки на карті</div><div class="cl-item-desc">Кожна ціль відображається іконкою з напрямком руху та підсвіткою для кращої видимості</div></div>
+        <div class="cl-item"><div class="cl-item-title">Зручне масштабування</div><div class="cl-item-desc">Іконки автоматично змінюють розмір при наближенні та віддаленні карти</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">📍 Маршрути</div>
+        <div class="cl-item"><div class="cl-item-title">Відображення маршруту</div><div class="cl-item-desc">Видно шлях, яким рухалася ціль — це допомагає зрозуміти напрямок загрози</div></div>
+        <div class="cl-item"><div class="cl-item-title">Прогноз руху</div><div class="cl-item-desc">Червона пунктирна лінія показує ймовірний подальший напрямок цілі</div></div>
+        <div class="cl-item"><div class="cl-item-title">Вектор курсу</div><div class="cl-item-desc">Зелена лінія вказує загальний напрямок руху на великій відстані</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">🎖️ Сектори загрози РСЗО</div>
+        <div class="cl-item"><div class="cl-item-title">Зона ураження</div><div class="cl-item-desc">Для РСЗО відображається сектор можливого ураження з анімацією</div></div>
+        <div class="cl-item"><div class="cl-item-title">Напрямок обстрілу</div><div class="cl-item-desc">Оператор задає напрямок — на карті з'являється зона потенційної загрози</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">🖥️ Інформаційна панель</div>
+        <div class="cl-item"><div class="cl-item-title">Статус-бар</div><div class="cl-item-desc">Зверху карти завжди видно поточний час та кількість активних цілей</div></div>
+        <div class="cl-item"><div class="cl-item-title">Вибір вигляду карти</div><div class="cl-item-desc">Зручна кнопка для швидкої зміни типу підкладки карти</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">💧 Захист контенту</div>
+        <div class="cl-item"><div class="cl-item-title">Водяний знак</div><div class="cl-item-desc">На всіх знімках з карти автоматично з'являється водяний знак @SkyKh_info</div></div>
+        <div class="cl-item"><div class="cl-item-title">Гнучке налаштування</div><div class="cl-item-desc">Зовнішній вигляд водяного знака оновлюється автоматично без перезавантаження</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">📡 Трансляція</div>
+        <div class="cl-item"><div class="cl-item-title">Карта в реальному часі</div><div class="cl-item-desc">Дані на карті оновлюються автоматично кожні кілька секунд — ви бачите актуальну ситуацію</div></div>
+        <div class="cl-item"><div class="cl-item-title">Автоматичне увімкнення</div><div class="cl-item-desc">Коли оператор запускає трансляцію — карта з'являється автоматично, без перезавантаження сторінки</div></div>
+        <div class="cl-item"><div class="cl-item-title">Повідомлення про статус</div><div class="cl-item-desc">Коли трансляція вимкнена — на екрані з'являється відповідне повідомлення</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">🤖 Telegram-бот</div>
+        <div class="cl-item"><div class="cl-item-title">Карта прямо в Telegram</div><div class="cl-item-desc">Натисніть кнопку в боті — і карта відкриється прямо у месенджері, без браузера</div></div>
+        <div class="cl-item"><div class="cl-item-title">Перевірка підписки</div><div class="cl-item-desc">Для перегляду карти потрібно бути підписником каналу @skykh_info</div></div>
+        <div class="cl-item"><div class="cl-item-title">Персональні сповіщення</div><div class="cl-item-desc">Команда /notify — отримуйте особисте повідомлення щоразу, коли починається або завершується трансляція</div></div>
+        <div class="cl-item"><div class="cl-item-title">Повідомлення від адміністрації</div><div class="cl-item-desc">Адміністратори можуть надсилати важливі повідомлення всім підписникам бота</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">🔒 Безпека</div>
+        <div class="cl-item"><div class="cl-item-title">Захищений доступ</div><div class="cl-item-desc">Вхід на карту захищений паролем — дані перевіряються на сервері</div></div>
+        <div class="cl-item"><div class="cl-item-title">Захист від зловмисників</div><div class="cl-item-desc">Обмеження кількості спроб входу, шифрування з'єднання та автоматичне блокування підозрілої активності</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">📋 Інше</div>
+        <div class="cl-item"><div class="cl-item-title">Журнал оновлень</div><div class="cl-item-desc">Кнопка 🔄 на карті — завжди можна переглянути, що нового з'явилося у проєкті</div></div>
+        <div class="cl-item"><div class="cl-item-title">Панель адміністрування</div><div class="cl-item-desc">Усі налаштування карти, бота та трансляцій керуються через зручну адмін-панель з підтримкою телефонів та планшетів</div></div>
+        <div class="cl-item"><div class="cl-item-title">Моніторинг та сповіщення</div><div class="cl-item-desc">Адміністратори отримують миттєві Telegram-сповіщення якщо щось пішло не так з роботою сервісу</div></div>
+        <div class="cl-item"><div class="cl-item-title">Статистика та графіки</div><div class="cl-item-desc">Детальні графіки активності проєкту — кількість трансляцій, активних користувачів та інших подій</div></div>
+      </div>
+
+      <div class="cl-group">
+        <div class="cl-group-title">🛠️ Оновлення 14.02.2026</div>
+        <div class="cl-item"><div class="cl-item-title">Сповіщення про нові цілі</div><div class="cl-item-desc">Коли ви зумовані на частину карти — зверху з'явиться повідомлення про нові цілі за межами екрану з їх типами та кількістю</div></div>
+        <div class="cl-item"><div class="cl-item-title">Клікабельний лічильник цілей</div><div class="cl-item-desc">Натисніть на статус-бар зверху карти — камера плавно відзумиться і покаже всі активні цілі</div></div>
+        <div class="cl-item"><div class="cl-item-title">Система зворотного зв'язку</div><div class="cl-item-desc">Нова команда /feedback у боті чату — пропозиції, скарги та баг-репорти надходять прямо в адмін-панель</div></div>
+        <div class="cl-item"><div class="cl-item-title">Виправлення білої смуги</div><div class="cl-item-desc">На мобільних пристроях більше не з'являється біла смуга внизу карти — фон адаптовано під всі розміри екрану</div></div>
+        <div class="cl-item"><div class="cl-item-title">Нагадування про донат</div><div class="cl-item-desc">Ненав'язливе спливаюче повідомлення з проханням підтримати проєкт. Частота та текст налаштовуються в адмін-панелі</div></div>
+      </div>
+
+      <div class="cl-version">Sky Kharkiv • v2.2 • 2026</div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== DONATE TOAST ===== */
+(function(){
+  let _dtCfg = null, _dtTimer = null, _dtHideTimer = null, _dtDismissed = false;
+
+  async function loadDonateToastCfg() {
+    try {
+      const r = await fetch('/api/donate-toast');
+      if (r.ok) _dtCfg = await r.json();
+    } catch(e) {}
+  }
+
+  function showDonateToast() {
+    if (_dtDismissed || !_dtCfg || !_dtCfg.enabled) return;
+    const el = document.getElementById('donateToast');
+    if (!el) return;
+    const txt = el.querySelector('.dt-text');
+    if (txt && _dtCfg.text) txt.textContent = _dtCfg.text;
+    if (_dtCfg.url) el.href = _dtCfg.url;
+    el.classList.add('show');
+    if (_dtHideTimer) clearTimeout(_dtHideTimer);
+    _dtHideTimer = setTimeout(() => { el.classList.remove('show'); }, (_dtCfg.duration_seconds || 5) * 1000);
+  }
+
+  window.closeDonateToast = function() {
+    const el = document.getElementById('donateToast');
+    if (el) el.classList.remove('show');
+    _dtDismissed = true;
+    if (_dtTimer) { clearInterval(_dtTimer); _dtTimer = null; }
+  };
+
+  // Poll for admin-triggered toast (test button)
+  let _lastTriggerTs = 0;
+  async function pollTrigger() {
+    try {
+      const r = await fetch('/api/donate-toast/trigger');
+      if (r.ok) {
+        const d = await r.json();
+        if (d.ts && d.ts > _lastTriggerTs && _lastTriggerTs > 0) {
+          // Force show even if dismissed
+          _dtDismissed = false;
+          if (_dtCfg) showDonateToast();
+        }
+        _lastTriggerTs = d.ts || 0;
+      }
+    } catch(e) {}
+  }
+
+  async function init() {
+    await loadDonateToastCfg();
+    // Start trigger polling regardless of enabled state (for admin testing)
+    pollTrigger();
+    setInterval(pollTrigger, 5000);
+    if (!_dtCfg || !_dtCfg.enabled) return;
+    const interval = (_dtCfg.interval_seconds || 120) * 1000;
+    setTimeout(() => {
+      showDonateToast();
+      _dtTimer = setInterval(showDonateToast, interval);
+    }, Math.min(interval / 2, 60000));
+  }
+
+  setTimeout(init, 3000);
+})();
+
+/* ===== VIEWER COUNTER ===== */
+(function(){
+  const VID_KEY = 'skykh_viewer_id';
+  function getVid(){
+    let v = sessionStorage.getItem(VID_KEY);
+    if(!v){ v = Math.random().toString(36).slice(2)+Date.now().toString(36); sessionStorage.setItem(VID_KEY,v); }
+    return v;
+  }
+  const vid = getVid();
+
+  async function heartbeat(){
+    try{
+      const r = await fetch('/api/viewers/heartbeat',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({vid})
+      });
+      if(r.ok){
+        const d = await r.json();
+        updateCounterUI(d.count);
+      }
+    }catch(e){}
+  }
+
+  function updateCounterUI(count){
+    const el = document.getElementById('viewerCounter');
+    if(!el) return;
+    const num = el.querySelector('.vc-num');
+    if(num) num.textContent = count;
+  }
+
+  heartbeat();
+  setInterval(heartbeat, 15000);
+})();
+
+/* ===== CHANGELOG ===== */
+(function(){
+  const btn=document.getElementById('changelogBtn'),ov=document.getElementById('changelogOverlay'),cl=document.getElementById('clClose');
+  if(!btn||!ov)return;
+  btn.addEventListener('click',()=>ov.classList.add('open'));
+  cl.addEventListener('click',()=>ov.classList.remove('open'));
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.classList.remove('open')});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&ov.classList.contains('open'))ov.classList.remove('open')});
+})();
+</script>
+
+</body>
+</html>
