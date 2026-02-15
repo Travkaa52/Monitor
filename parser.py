@@ -3,45 +3,84 @@ import json
 import asyncio
 from telethon import TelegramClient, events
 
-# Конфигурация
+# Конфігурація з GitHub Secrets
 API_ID = int(os.environ['API_ID'])
 API_HASH = os.environ['API_HASH']
 BOT_TOKEN = os.environ['BOT_TOKEN']
 ADMIN_IDS = [int(i.strip()) for i in os.environ.get('ADMIN_IDS', '').split(',')]
 DATA_FILE = 'targets.json'
 
-client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
-
 def update_json(new_target):
+    # Створюємо файл, якщо його не існує
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'w') as f:
+            json.dump({"items": []}, f)
+            
     with open(DATA_FILE, 'r+') as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            data = {"items": []}
+        
         data['items'].append(new_target)
         f.seek(0)
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, ensure_ascii=False)
         f.truncate()
 
-@client.on(events.NewMessage(pattern='/add'))
-async def add(event):
-    if event.sender_id not in ADMIN_IDS: return
-    try:
-        # Формат: /add тип лат лон курс (напр. /add shahed 49.9 36.2 220)
-        _, t, lat, lon, bear = event.text.split()
-        target = {
-            "id": str(os.urandom(4).hex()),
-            "type": t, "lat": float(lat), "lon": float(lon), "bearing": int(bear)
-        }
-        update_json(target)
-        await event.respond(f"✅ Добавлено!")
-        await client.disconnect() # Важно для завершения Action
-    except:
-        await event.respond("Ошибка! Формат: /add тип лат лон курс")
-
 async def main():
-    # Бот ждет команду 45 секунд, если команд нет - закрывается (экономит ресурсы)
+    # Ініціалізуємо клієнт всередині main, щоб уникнути конфлікту циклів подій
+    client = TelegramClient('bot_session', API_ID, API_HASH)
+    await client.start(bot_token=BOT_TOKEN)
+    
+    print("Бот запущений, очікування команд...")
+
+    @client.on(events.NewMessage(pattern='/add'))
+    async def add(event):
+        if event.sender_id not in ADMIN_IDS:
+            return
+        try:
+            # Формат: /add тип лат лон курс
+            parts = event.text.split()
+            if len(parts) < 5:
+                await event.respond("❌ Формат: `/add тип lat lon bearing`")
+                return
+
+            t_type, lat, lon, bear = parts[1], float(parts[2]), float(parts[3]), int(parts[4])
+            
+            target = {
+                "id": str(os.urandom(3).hex()),
+                "type": t_type,
+                "lat": lat,
+                "lon": lon,
+                "bearing": bear,
+                "description": "Ціль додана через Telegram"
+            }
+            
+            update_json(target)
+            await event.respond(f"✅ Додано: {t_type} (ID: {target['id']})")
+            
+            # Зупиняємо бота після отримання команди, щоб завершити GitHub Action
+            await client.disconnect()
+        except Exception as e:
+            await event.respond(f"❌ Помилка: {str(e)}")
+
+    @client.on(events.NewMessage(pattern='/clear'))
+    async def clear(event):
+        if event.sender_id not in ADMIN_IDS: return
+        with open(DATA_FILE, 'w') as f:
+            json.dump({"items": []}, f)
+        await event.respond("🧹 Карту очищено")
+        await client.disconnect()
+
+    # Бот чекає 45 секунд. Якщо за цей час ви надішлете команду — Action виконається і збереже дані.
+    # Якщо команд не буде — він просто вимкнеться (щоб не витрачати хвилини GitHub Actions).
     try:
         await asyncio.wait_for(client.run_until_disconnected(), timeout=45)
     except asyncio.TimeoutError:
-        pass
+        print("Час очікування вийшов, нових команд немає.")
+    finally:
+        if client.is_connected():
+            await client.disconnect()
 
 if __name__ == '__main__':
     asyncio.run(main())
