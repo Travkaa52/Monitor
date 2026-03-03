@@ -54,324 +54,144 @@ setInterval(async () => {
   <script src="https://cdn.jsdelivr.net/npm/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.js"></script>
 
   <style>
+<style>
 :root {
-  --panel-bg: rgba(5, 12, 5, 0.95); /* Темно-зеленый тактический фон */
-  --panel-text: #00ff41;           /* Цвет "Матрицы" */
+  --panel-bg: rgba(2, 6, 4, 0.98);
+  --panel-text: #00ff41;           /* Phosphor Green */
   --route-main: #00ff41;
   --route-shadow: #000000;
-  --btn-primary: #1b4d2e;
-  --card-bg: rgba(5, 12, 5, 0.98);
-  --card-border: rgba(0, 255, 65, 0.4);
-  --card-hover: rgba(0, 255, 65, 0.15);
-  --glow: drop-shadow(0 0 5px #00ff41);
-  --map-overlay-br: brightness(0.8) contrast(1.2) hue-rotate(80deg);
+  --btn-primary: #003311;
+  --card-bg: rgba(0, 10, 5, 0.98);
+  --card-border: rgba(0, 255, 65, 0.5);
+  --card-hover: rgba(0, 255, 65, 0.2);
+  --card-active: rgba(0, 255, 65, 0.3);
+  --glow: drop-shadow(0 0 3px #00ff41);
+  --map-overlay-br: brightness(0.7) contrast(1.2) grayscale(0.5) hue-rotate(85deg);
 }
 
-html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; font-family:system-ui,"Segoe UI",sans-serif; background:#0a0e14; color:var(--panel-text); }
-#map { position:relative; width:100vw; height:100vh; height:100dvh; background:#0a0e14; }
-.leaflet-container { background:#0a0e14 !important; }
+html, body { 
+  margin:0; padding:0; width:100%; height:100%; overflow:hidden; 
+  font-family: "Courier New", Courier, monospace; 
+  background:#000500; color:var(--panel-text); 
+}
 
-/* Радарна сітка */
+#map { position:relative; width:100vw; height:100vh; background:#000500; }
+.leaflet-container { background:#000500 !important; }
+
+/* Tactical Scanline Grid */
 #map::before {
   content:""; position:absolute; inset:0; pointer-events:none; z-index:8;
   background-image:
-    repeating-linear-gradient(0deg, rgba(123,255,171,0.06) 0px, rgba(123,255,171,0.06) 1px, transparent 1px, transparent 32px),
-    repeating-linear-gradient(90deg, rgba(123,255,171,0.06) 0px, rgba(123,255,171,0.06) 1px, transparent 1px, transparent 32px);
-  mix-blend-mode:soft-light; opacity:0.55;
+    linear-gradient(rgba(0, 255, 65, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 65, 0.1) 1px, transparent 1px);
+  background-size: 30px 30px;
+  opacity: 0.4;
 }
+
 #map::after {
   content:""; position:absolute; inset:0; pointer-events:none; z-index:5;
-  background: radial-gradient(circle at 50% 50%, transparent 0%, transparent 55%, rgba(0,0,0,0.55) 100%);
+  background: 
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.15), rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px),
+    radial-gradient(circle at 50% 50%, transparent 30%, rgba(0,10,0,0.7) 100%);
 }
-.leaflet-pane, .leaflet-control-container { position:relative; z-index:9; }
 
-/* Статус-бар зверху */
+/* HUD Status Bar */
 #statusBar {
-  position:absolute; top:10px; left:50%; transform:translateX(-50%);
-  padding:5px 14px; background:linear-gradient(135deg,rgba(5,10,16,0.95),rgba(8,14,22,0.95));
-  color:var(--panel-text); font:600 12px/1 system-ui; letter-spacing:.06em; text-transform:uppercase;
-  border-radius:999px; border:1px solid rgba(123,255,171,0.5);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.85), 0 8px 18px rgba(0,0,0,0.7);
-  z-index:1100; pointer-events:auto; cursor:pointer; backdrop-filter:blur(6px);
-  transition: box-shadow .2s, border-color .2s;
+  position:absolute; top:15px; left:50%; transform:translateX(-50%);
+  padding:8px 24px; background: var(--panel-bg);
+  color: var(--panel-text); font: 700 12px monospace; letter-spacing: 2px;
+  border-radius: 0; 
+  border: 1px solid var(--card-border);
+  border-left: 4px solid var(--panel-text);
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
+  z-index:1100; backdrop-filter:blur(10px);
+  text-transform: uppercase;
 }
-#statusBar:active { border-color:rgba(123,255,171,0.8); box-shadow:0 0 0 1px rgba(0,0,0,0.85), 0 0 12px rgba(123,255,171,0.3); }
-#statusBar::before { content:"■"; font-size:10px; margin-right:6px; color:#7bffab; text-shadow:0 0 4px #7bffab; }
+#statusBar::before { content: "[SYNC] "; color: var(--panel-text); font-size: 10px; text-shadow: none; }
 
-/* Toast для нових цілей */
+/* Alert Toasts */
 #newTargetToast {
-  position:fixed; top:56px; left:50%; transform:translateX(-50%) translateY(-120%);
-  padding:8px 18px; border-radius:12px;
-  background:linear-gradient(135deg,rgba(5,10,16,0.95),rgba(8,14,22,0.95));
-  color:#7bffab; font:600 13px/1.3 system-ui; letter-spacing:.03em;
-  border:1px solid rgba(123,255,171,0.45);
-  box-shadow:0 4px 20px rgba(0,0,0,0.6), 0 0 8px rgba(123,255,171,0.15);
-  z-index:1200; pointer-events:auto; cursor:pointer;
-  backdrop-filter:blur(8px);
-  opacity:0; transition: transform .35s cubic-bezier(.4,0,.2,1), opacity .35s;
-  white-space:nowrap;
+  position:fixed; top:70px; left:50%; transform:translateX(-50%) translateY(-120%);
+  padding:10px 20px; border-radius: 0;
+  background: #0a0000; color: #ff3333; font: 900 13px monospace;
+  border: 1px solid #ff3333;
+  box-shadow: 0 0 30px rgba(255, 0, 0, 0.2);
+  z-index:1200; opacity: 0; text-transform: uppercase;
 }
-#newTargetToast.show {
-  transform:translateX(-50%) translateY(0); opacity:1;
-}
-#newTargetToast::before { content:"⚠"; margin-right:6px; }
+#newTargetToast.show { transform:translateX(-50%) translateY(0); opacity:1; }
 
-/* Donate toast */
-#donateToast {
-  position:fixed; bottom:68px; right:16px; z-index:10002;
-  padding:10px 18px; border-radius:14px;
-  background:linear-gradient(135deg,rgba(10,14,20,0.92),rgba(18,22,30,0.92));
-  color:#ffc83c; font:600 13px/1.3 system-ui; letter-spacing:.02em;
-  border:1px solid rgba(255,200,60,0.35);
-  box-shadow:0 4px 20px rgba(0,0,0,0.5), 0 0 10px rgba(255,200,60,0.08);
-  pointer-events:auto; cursor:pointer; backdrop-filter:blur(8px);
-  opacity:0; transform:translateY(12px) scale(0.95);
-  transition: opacity .4s cubic-bezier(.4,0,.2,1), transform .4s cubic-bezier(.4,0,.2,1);
-  text-decoration:none; display:flex; align-items:center; gap:8px;
-  white-space:nowrap;
+/* Tactical Buttons */
+.recenter-btn, #donateBtn, #changelogBtn {
+  border-radius: 0 !important;
+  border: 1px solid var(--card-border) !important;
+  background: rgba(0, 20, 10, 0.8) !important;
+  color: var(--panel-text) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(5px);
 }
-#donateToast.show {
-  opacity:1; transform:translateY(0) scale(1);
-}
-#donateToast .dt-icon { font-size:16px; }
-#donateToast .dt-close {
-  margin-left:6px; opacity:0.5; font-size:14px; transition:opacity .2s;
-}
-#donateToast .dt-close:hover { opacity:1; }
-@media (max-width:640px){
-  #donateToast { bottom:58px; right:12px; font-size:12px; padding:8px 14px; }
+.recenter-btn:hover, #donateBtn:hover, #changelogBtn:hover {
+  background: var(--panel-text) !important;
+  color: #000 !important;
 }
 
-/* Дебаг-статус знизу */
-#tgDebug {
-  position:fixed; right:10px; bottom:10px; z-index:9999;
-  padding:6px 10px; border-radius:8px;
-  background:rgba(10,14,20,0.75); color:#e8f0ff;
-  font:600 12px/1.2 system-ui; border:1px solid rgba(255,255,255,0.15);
-  pointer-events:none;
-}
-
-/* Кнопка рецентру */
-.recenter-btn {
-  position:fixed; right:12px; bottom:58px; z-index:9999;
-  width:42px; height:42px; border-radius:10px;
-  border:1px solid rgba(121,255,154,0.35);
-  background:rgba(8,12,16,0.65); color:#79ff9a; cursor:pointer;
-  font-size:0; backdrop-filter:blur(4px);
-  box-shadow:0 6px 14px rgba(0,0,0,0.45);
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2379ff9a' stroke-width='1.5'><circle cx='12' cy='12' r='7'/><line x1='12' y1='2' x2='12' y2='6'/><line x1='12' y1='18' x2='12' y2='22'/><line x1='2' y1='12' x2='6' y2='12'/><line x1='18' y1='12' x2='22' y2='12'/></svg>");
-  background-repeat:no-repeat; background-position:center;
-}
-.recenter-btn:active { transform:translateY(1px); }
-
-/* РСЗО підпис */
+/* Labels & Tooltips */
 .rszo-tag {
-  background:rgba(5,10,16,0.82); color:#f4f7ff;
-  border:1px solid rgba(255,60,80,0.55); border-radius:10px; padding:2px 7px;
-  font:700 11px/1 system-ui; letter-spacing:.04em; text-transform:uppercase;
-  box-shadow:0 0 0 1px rgba(0,0,0,0.8), 0 6px 12px rgba(0,0,0,0.55);
-  pointer-events:none; white-space:nowrap;
+  background: #ff0000; color: #fff;
+  border: 1px solid #000; border-radius: 0;
+  font-weight: 900; letter-spacing: 1px;
 }
 
-/* Іконки маркерів */
-.leaflet-marker-icon { filter:var(--glow); }
-.leaflet-overlay-pane canvas { filter:var(--map-overlay-br); }
-.drone-label { font-size:10px; padding:1px 4px; border-radius:4px; background:rgba(255,255,255,.55); color:#ff3; text-shadow:0 0 3px #000; pointer-events:none; }
-.drone-label.light { background:rgba(0,0,0,.55); color:#fff; text-shadow:0 0 2px #f33; }
-
-/* ===== Док підкладок карти (лівий верхній кут) ===== */
-.basemap-switcher { position:absolute; left:12px; top:12px; z-index:1100; }
-.bm-fab {
-  width:34px; height:34px; border-radius:999px; border:none; cursor:pointer;
-  font-size:18px; display:flex; align-items:center; justify-content:center;
-  background:var(--panel-bg); color:var(--panel-text);
-  box-shadow:0 4px 14px rgba(0,0,0,.35);
-}
-.bm-fab:hover { background:var(--card-hover); }
-.bm-panel {
-  position:absolute; left:0; top:42px; transform:translateY(8px);
-  opacity:0; pointer-events:none; transition:opacity .15s, transform .15s;
-  background:rgba(255,255,255,0.95); color:#1a1a1a;
-  border:1px solid rgba(0,0,0,0.15); border-radius:12px;
-  box-shadow:0 4px 14px rgba(0,0,0,.25); padding:8px 8px 6px;
-  max-width:280px; backdrop-filter:blur(6px);
-}
-.basemap-switcher.open .bm-panel, .basemap-switcher:hover .bm-panel {
-  opacity:1; transform:translateY(0); pointer-events:auto;
-}
-.bm-title { font:600 11px/1 system-ui; text-transform:uppercase; letter-spacing:.04em; color:#555; margin:0 0 4px 2px; }
-.bm-list { display:flex; flex-wrap:wrap; gap:6px; }
-.bm-item {
-  flex:1 1 120px; min-width:120px; max-width:100%; border-radius:10px;
-  border:1px solid rgba(0,0,0,0.12); background:rgba(245,245,245,0.9); color:#1a1a1a;
-  padding:6px 8px; text-align:left; cursor:pointer;
-  display:flex; flex-direction:column; gap:2px;
-  transition:background .15s, border-color .15s; font:400 12px/1.1 system-ui;
-}
-.bm-item:hover { background:rgba(230,230,230,0.95); }
-.bm-item.active { border-color:#0d6efd; background:rgba(220,235,255,0.95); box-shadow:0 0 0 2px rgba(13,110,253,.35) inset; }
-.bm-name { font-weight:600; font-size:12px; color:#1a1a1a; }
-.bm-sub { font-size:11px; color:#555; }
-
-/* Попап назви цілі */
 .target-popup .leaflet-popup-content-wrapper {
-  background:rgba(5,10,16,0.92); color:#f4f7ff; border:1px solid rgba(123,255,171,0.4);
-  border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,0.5); font:600 13px/1.2 system-ui;
-  padding:0;
+  background: #000; color: var(--panel-text);
+  border: 1px solid var(--panel-text);
+  border-radius: 0; box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+  font-family: monospace;
 }
-.target-popup .leaflet-popup-content { margin:6px 10px; }
-.target-popup .leaflet-popup-tip { background:rgba(5,10,16,0.92); border:1px solid rgba(123,255,171,0.4); border-top:none; border-left:none; }
+.target-popup .leaflet-popup-tip { background: var(--panel-text); }
 
-/* Заглушка «Карта вимкнена» */
+/* BaseMap Switcher */
+.bm-fab { border-radius: 0; border: 1px solid var(--card-border); }
+.bm-panel {
+  background: #000; border: 1px solid var(--card-border);
+  border-radius: 0; color: var(--panel-text);
+}
+.bm-item {
+  border-radius: 0; background: #050505; color: var(--panel-text);
+  border: 1px solid rgba(0, 255, 65, 0.2);
+}
+.bm-item.active { border-color: var(--panel-text); background: var(--btn-primary); }
+.bm-name { color: var(--panel-text); }
+.bm-sub, .bm-title { color: rgba(0, 255, 65, 0.6); font-family: monospace; }
+
+/* Changelog Modal */
+#changelogModal {
+  background: #000; border: 1px solid var(--panel-text); border-radius: 0;
+}
+.cl-header { border-bottom: 2px solid var(--panel-text); }
+.cl-header h2 { color: var(--panel-text); text-transform: uppercase; letter-spacing: 3px; }
+.cl-group-title { border-bottom: 1px solid var(--panel-text); color: var(--panel-text); }
+.cl-item { 
+  border-left: 2px solid var(--panel-text); 
+  background: rgba(0, 255, 65, 0.05); border-radius: 0;
+}
+
+/* Viewer Counter */
+#viewerCounter {
+  border-radius: 0; border: 1px solid var(--card-border);
+  background: #000; color: var(--panel-text);
+  font-family: monospace; padding: 8px 15px;
+}
+#viewerCounter .vc-dot { border-radius: 0; width: 8px; height: 8px; }
+
+/* Stream Offline Overlay */
 #streamOffline {
-  display:none; position:fixed; inset:0; z-index:99999;
-  background:linear-gradient(160deg, #0a0e14 0%, #111820 50%, #0a0e14 100%);
-  flex-direction:column; align-items:center; justify-content:center; text-align:center;
-  padding:32px;
+  background: #000;
+  background-image: radial-gradient(circle, #001a00 0%, #000 100%);
 }
-#streamOffline.visible { display:flex; }
-#streamOffline .offline-icon { font-size:64px; margin-bottom:20px; opacity:0.7; }
-#streamOffline h1 {
-  font:700 22px/1.3 system-ui; color:#ff6b6b; text-transform:uppercase;
-  letter-spacing:.08em; margin:0 0 16px;
-}
-#streamOffline p {
-  font:400 14px/1.6 system-ui; color:rgba(244,247,255,0.7);
-  max-width:360px; margin:0;
-}
+#streamOffline h1 { color: #ff3333; font-family: monospace; letter-spacing: 5px; }
 
-@media (max-width:640px) {
-  .basemap-switcher { left:8px; top:8px; }
-}
-
-/* ===== DONATE BUTTON ===== */
-#donateBtn{
-  position:fixed;bottom:16px;right:16px;z-index:10001;
-  height:42px;padding:0 16px;
-  border-radius:999px;border:1px solid rgba(255,200,60,0.45);
-  background:rgba(10,14,20,0.8);backdrop-filter:blur(8px);
-  color:#ffc83c;font:600 13px/1 system-ui;cursor:pointer;
-  display:flex;align-items:center;gap:8px;
-  transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,0.4);
-  text-decoration:none;
-}
-#donateBtn:hover{background:rgba(255,200,60,0.15);transform:scale(1.05)}
-#donateBtn .donate-icon{font-size:18px}
-#donateBtn .donate-label{letter-spacing:.03em}
-@media (max-width:640px){
-  #donateBtn{bottom:12px;right:12px;height:38px;padding:0 12px;font-size:12px}
-}
-
-/* ===== CHANGELOG BUTTON & MODAL ===== */
-#changelogBtn{
-  position:fixed;bottom:16px;left:16px;z-index:10001;
-  width:40px;height:40px;border-radius:50%;border:1px solid rgba(123,255,171,0.35);
-  background:rgba(10,14,20,0.75);backdrop-filter:blur(8px);
-  color:#7bffab;font-size:16px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,0.4);
-}
-#changelogBtn:hover{background:rgba(123,255,171,0.15);transform:scale(1.1)}
-
-#changelogOverlay{
-  display:none;position:fixed;inset:0;z-index:100002;
-  background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);
-  align-items:center;justify-content:center;padding:16px;
-}
-#changelogOverlay.open{display:flex}
-
-#changelogModal{
-  background:linear-gradient(135deg,#0d1117 0%,#161b22 100%);
-  border:1px solid rgba(123,255,171,0.2);border-radius:16px;
-  color:#e6edf3;width:100%;max-width:640px;max-height:85vh;
-  display:flex;flex-direction:column;
-  box-shadow:0 8px 40px rgba(0,0,0,0.6);overflow:hidden;
-}
-#changelogModal .cl-header{
-  padding:20px 24px 16px;border-bottom:1px solid rgba(123,255,171,0.12);
-  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
-}
-#changelogModal .cl-header h2{
-  margin:0;font:700 18px/1.3 system-ui,sans-serif;color:#7bffab;
-  display:flex;align-items:center;gap:8px;
-}
-#changelogModal .cl-close{
-  background:none;border:none;color:#8b949e;font-size:22px;cursor:pointer;
-  width:32px;height:32px;display:flex;align-items:center;justify-content:center;
-  border-radius:8px;transition:all .2s;
-}
-#changelogModal .cl-close:hover{background:rgba(255,255,255,0.1);color:#fff}
-#changelogModal .cl-body{
-  overflow-y:auto;padding:8px 24px 24px;flex:1;-webkit-overflow-scrolling:touch;
-}
-#changelogModal .cl-body::-webkit-scrollbar{width:4px}
-#changelogModal .cl-body::-webkit-scrollbar-thumb{background:rgba(123,255,171,0.2);border-radius:2px}
-
-.cl-group{margin-bottom:20px}
-.cl-group-title{
-  font:700 13px/1 system-ui;color:#7bffab;text-transform:uppercase;letter-spacing:.08em;
-  margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid rgba(123,255,171,0.1);
-  display:flex;align-items:center;gap:6px;
-}
-.cl-item{
-  padding:8px 12px;margin-bottom:6px;
-  background:rgba(255,255,255,0.03);border-radius:10px;
-  border-left:3px solid rgba(123,255,171,0.25);transition:background .2s;
-}
-.cl-item:hover{background:rgba(123,255,171,0.06)}
-.cl-item-title{font:600 13px/1.4 system-ui;color:#e6edf3;margin-bottom:2px}
-.cl-item-desc{font:400 12px/1.5 system-ui;color:#8b949e}
-.cl-version{
-  text-align:center;padding:12px 0 6px;
-  font:600 11px/1 system-ui;color:#484f58;letter-spacing:.06em;
-}
-/* ===== VIEWER COUNTER ===== */
-#viewerCounter{
-  position:fixed;bottom:64px;left:16px;z-index:10001;
-  display:flex;align-items:center;gap:6px;
-  padding:5px 12px 5px 10px;
-  border-radius:999px;
-  background:rgba(8,13,18,0.82);
-  backdrop-filter:blur(8px);
-  border:1px solid rgba(123,255,171,0.25);
-  box-shadow:0 2px 12px rgba(0,0,0,0.4);
-  font:600 12px/1 system-ui,sans-serif;
-  color:rgba(200,210,230,0.85);
-  pointer-events:none;
-  transition:opacity .4s;
-}
-#viewerCounter .vc-dot{
-  width:7px;height:7px;border-radius:50%;
-  background:#7bffab;
-  box-shadow:0 0 6px rgba(123,255,171,0.6);
-  animation:vc-pulse 2s ease-in-out infinite;
-}
-@keyframes vc-pulse{
-  0%,100%{opacity:1;transform:scale(1)}
-  50%{opacity:.5;transform:scale(.75)}
-}
-#viewerCounter .vc-num{
-  font-variant-numeric:tabular-nums;
-  color:#7bffab;
-  font-weight:700;
-}
-@media(max-width:640px){
-  #viewerCounter{bottom:56px;left:12px;padding:4px 10px 4px 8px;font-size:11px;gap:5px}
-  #viewerCounter .vc-dot{width:6px;height:6px}
-}
-@media(max-width:480px){
-  #viewerCounter{bottom:52px;left:12px}
-}
-
-@media(max-width:480px){
-  #changelogBtn{width:36px;height:36px;font-size:14px;bottom:12px;left:12px}
-  #changelogModal{max-height:90vh;border-radius:12px}
-  #changelogModal .cl-header{padding:16px 16px 12px}
-  #changelogModal .cl-header h2{font-size:15px}
-  #changelogModal .cl-body{padding:6px 16px 20px}
-  .cl-item{padding:6px 10px}
-  .cl-item-title{font-size:12px}
-  .cl-item-desc{font-size:11px}
+@media (max-width:480px) {
+  #statusBar { font-size: 10px; width: 90%; text-align: center; }
 }
   </style>
 </head>
