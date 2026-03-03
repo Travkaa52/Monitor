@@ -55,21 +55,16 @@ setInterval(async () => {
 
   <style>
 :root {
-  --panel-bg: rgba(8, 13, 18, 0.96);
-  --panel-text: #f4f7ff;
-  --route-main: #79ff9a;
-  --route-shadow: #020409;
-  --btn-primary: #2fbf71;
-  --card-bg: rgba(11, 17, 24, 0.96);
-  --card-border: rgba(123, 255, 171, 0.20);
-  --card-hover: rgba(123, 255, 171, 0.12);
-  --card-active: rgba(123, 255, 171, 0.20);
-  --glow:
-    drop-shadow(0 0 0.6px #ffb347)
-    drop-shadow(0 0 3px   #ffb347)
-    brightness(1.05)
-    contrast(1.05);
-  --map-overlay-br: brightness(1.06) contrast(1.05);
+  --panel-bg: rgba(5, 12, 5, 0.95); /* Темно-зеленый тактический фон */
+  --panel-text: #00ff41;           /* Цвет "Матрицы" */
+  --route-main: #00ff41;
+  --route-shadow: #000000;
+  --btn-primary: #1b4d2e;
+  --card-bg: rgba(5, 12, 5, 0.98);
+  --card-border: rgba(0, 255, 65, 0.4);
+  --card-hover: rgba(0, 255, 65, 0.15);
+  --glow: drop-shadow(0 0 5px #00ff41);
+  --map-overlay-br: brightness(0.8) contrast(1.2) hue-rotate(80deg);
 }
 
 html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; font-family:system-ui,"Segoe UI",sans-serif; background:#0a0e14; color:var(--panel-text); }
