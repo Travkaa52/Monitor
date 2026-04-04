@@ -1,30 +1,25 @@
-name: Telegram Parser
+name: Monitor Parser
 
 on:
   schedule:
-    # Запуск каждые 5 минут для поддержания работы
     - cron: '*/5 * * * *'
-  workflow_dispatch:  # Ручной запуск
+  workflow_dispatch:
 
 jobs:
   run-parser:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
     - name: Install dependencies
-      run: |
-        pip install --upgrade pip
-        pip install telethon
+      run: pip install telethon
     
     - name: Run parser
       env:
@@ -38,10 +33,10 @@ jobs:
         python bot.py &
         sleep 280
     
-    - name: Commit and push changes
+    - name: Commit and push
       run: |
-        git config --global user.name 'GitHub Bot'
+        git config --global user.name 'Bot'
         git config --global user.email 'bot@github.com'
         git add targets.json bot.log last_message_state.json || true
-        git commit -m "Auto-update targets from channels" || echo "No changes"
-        git push || echo "No push needed"
+        git commit -m "Update targets from monitor" || echo "No changes"
+        git push || true
