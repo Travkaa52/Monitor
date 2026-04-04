@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Telegram Parser Bot для мониторинга Харьковской области
-Парсит сообщения канала monitor 1654, преобразует названия населенных пунктов в координаты
+Telegram Parser - использует API ID/HASH (user account)
+Читает каналы через API, не требует бота
 """
 
 import os
@@ -10,44 +10,32 @@ import re
 import json
 import asyncio
 import uuid
-import subprocess
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 
 from telethon import TelegramClient, events
 
 # ==================== КОНФИГУРАЦИЯ ====================
+# Обязательные переменные
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
+PHONE_NUMBER = os.environ.get('PHONE_NUMBER', '')  # Номер телефона в формате +380...
 
-# Каналы для парсинга
+# Каналы для парсинга (можно username или ID)
 SOURCE_CHANNELS = os.environ.get('SOURCE_CHANNELS', '@monitor1654').split(',')
-
-# ID админов
-ADMIN_IDS = [int(i.strip()) for i in os.environ.get('ADMIN_IDS', '').split(',') if i.strip()]
 
 # Файлы
 DATA_FILE = 'targets.json'
 LOG_FILE = 'bot.log'
 STATE_FILE = 'last_message_state.json'
-LOCATIONS_FILE = 'locations.json'  # База населенных пунктов с координатами
+SESSION_FILE = 'user_session.session'  # Сессия для сохранения авторизации
 
-# GitHub настройки
-GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
-GITHUB_REPO = os.environ.get('GITHUB_REPOSITORY', '')
-
-# ==================== БАЗА НАСЕЛЕННЫХ ПУНКТОВ ХАРЬКОВСКОЙ ОБЛАСТИ ====================
-# Координаты населенных пунктов (широта, долгота)
+# ==================== БАЗА НАСЕЛЕННЫХ ПУНКТОВ ====================
 LOCATIONS_DB = {
-    # Харьков и пригороды
     "харків": (49.9935, 36.2304),
     "харьков": (49.9935, 36.2304),
     "центр": (49.9935, 36.2304),
     "місто": (49.9935, 36.2304),
-    "город": (49.9935, 36.2304),
-    
-    # Северное направление
     "липці": (50.2031, 36.4147),
     "липцы": (50.2031, 36.4147),
     "циркуни": (50.0058, 36.4164),
@@ -61,20 +49,12 @@ LOCATIONS_DB = {
     "дергачи": (50.1142, 36.1208),
     "козача лопань": (50.3369, 36.1711),
     "казачья лопань": (50.3369, 36.1711),
-    "зупинка": (50.2031, 36.4147),
-    
-    # Северо-восточное
     "велика данилівка": (50.0747, 36.3297),
     "большая даниловка": (50.0747, 36.3297),
     "мала данилівка": (50.0558, 36.3331),
     "малая даниловка": (50.0558, 36.3331),
-    "жуковського": (50.0747, 36.3297),
-    "жуковского": (50.0747, 36.3297),
-    
-    # Восточное направление
-    "чугунів": (49.8358, 36.6886),
-    "чугуев": (49.8358, 36.6886),
     "чугуїв": (49.8358, 36.6886),
+    "чугуев": (49.8358, 36.6886),
     "печеніги": (49.8703, 36.9358),
     "печенеги": (49.8703, 36.9358),
     "кочеток": (49.8747, 36.7386),
@@ -82,30 +62,14 @@ LOCATIONS_DB = {
     "момотово": (50.0042, 36.4758),
     "північна салтівка": (50.0347, 36.3964),
     "северная салтовка": (50.0347, 36.3964),
-    "салтівка": (50.0347, 36.3964),
-    "салтовка": (50.0347, 36.3964),
-    
-    # Юго-восточное
     "безлюдівка": (49.8706, 36.2767),
     "безлюдовка": (49.8706, 36.2767),
     "докучаєвське": (49.8853, 36.2664),
     "докучаевское": (49.8853, 36.2664),
-    "хроли": (49.9208, 36.2411),
-    "рогань": (49.9053, 36.4806),
-    "рогань": (49.9053, 36.4806),
-    
-    # Южное направление
     "пісочин": (49.9564, 36.1136),
     "песочин": (49.9564, 36.1136),
     "буди": (49.8942, 36.0181),
     "люботин": (49.9486, 35.9258),
-    "люботин": (49.9486, 35.9258),
-    "південне": (49.8833, 36.0667),
-    "южное": (49.8833, 36.0667),
-    "ков'яги": (49.8347, 35.8875),
-    "ковяги": (49.8347, 35.8875),
-    
-    # Западное направление
     "веселе": (50.0139, 36.1167),
     "шестакове": (50.0158, 36.1486),
     "шестаково": (50.0158, 36.1486),
@@ -121,8 +85,6 @@ LOCATIONS_DB = {
     "богодухов": (50.1647, 35.5272),
     "краснокутськ": (50.0558, 35.1575),
     "краснокутск": (50.0558, 35.1575),
-    
-    # Другие важные точки
     "аеропорт": (49.9247, 36.2867),
     "аэропорт": (49.9247, 36.2867),
     "питомник": (50.0331, 36.3264),
@@ -131,26 +93,18 @@ LOCATIONS_DB = {
     "кам'яна яруга": (50.2769, 36.3586),
     "каменная яруга": (50.2769, 36.3586),
     "тетлега": (50.1406, 36.4369),
-    "полтавщина": (49.5894, 34.5514),
-    "полтавская": (49.5894, 34.5514),
-    "сумщина": (50.9072, 34.7989),
-    "бельгород": (50.5975, 36.5858),
-    "белгород": (50.5975, 36.5858),
-    "оскіл": (49.1706, 37.4092),
-    "изюм": (49.2125, 37.2628),
-    "ізюм": (49.2125, 37.2628),
 }
 
 # Типы целей по ключевым словам
 TARGET_KEYWORDS = {
-    'shahed': ['шахед', 'шахедів', 'шахедом', 'shahed', 'байрактар'],
+    'shahed': ['шахед', 'шахедів', 'шахедом', 'shahed', 'реактивний шахед'],
     'rocket': ['ракета', 'ракет', 'крилата', 'крилату', 'калібр'],
-    'kab': ['каб', 'авіабомба', 'умкп'],
+    'kab': ['каб', 'каби', 'авіабомба', 'умкп'],
     'molniya': ['молнія', 'молния'],
     'gerbera': ['гербера'],
-    'orlan': ['орлан', 'розвідник'],
+    'orlan': ['орлан', 'розвідник', 'розвідка'],
     'rszo': ['рсзо', 'град', 'смерч'],
-    'explosion': ['приліт', 'вибух', 'впав', 'удар'],
+    'explosion': ['приліт', 'вибух', 'впав', 'удар', 'попадання'],
     'balistika': ['балістика', 'баллистика', 'іскандер'],
 }
 
@@ -164,46 +118,6 @@ def log_message(msg: str):
     try:
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(full_msg + '\n')
-    except:
-        pass
-
-
-def git_push():
-    """Автоматический пуш на GitHub"""
-    if not GITHUB_TOKEN or not GITHUB_REPO:
-        return False
-    try:
-        repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
-        subprocess.run(['git', 'config', '--global', 'user.email', 'bot@github.com'], capture_output=True)
-        subprocess.run(['git', 'config', '--global', 'user.name', 'GitHub Actions Bot'], capture_output=True)
-        subprocess.run(['git', 'add', DATA_FILE, LOG_FILE, STATE_FILE], capture_output=True)
-        commit_msg = f"Update targets {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        result = subprocess.run(['git', 'commit', '-m', commit_msg], capture_output=True)
-        if result.returncode == 0:
-            subprocess.run(['git', 'push', repo_url, 'HEAD:main'], capture_output=True)
-            log_message("✅ Изменения запушены")
-            return True
-    except Exception as e:
-        log_message(f"❌ Ошибка git push: {e}")
-    return False
-
-
-def load_state() -> Dict:
-    """Загрузка состояния"""
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-
-def save_state(state: Dict):
-    """Сохранение состояния"""
-    try:
-        with open(STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(state, f, indent=2)
     except:
         pass
 
@@ -227,29 +141,28 @@ def save_targets(data: Dict) -> bool:
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        git_push()
+        log_message(f"💾 Сохранено {len(data.get('items', []))} целей")
         return True
     except Exception as e:
-        log_message(f"Ошибка сохранения: {e}")
+        log_message(f"❌ Ошибка сохранения: {e}")
         return False
 
 
 def extract_location(text: str) -> Optional[Tuple[str, Tuple[float, float]]]:
-    """Извлечение названия населенного пункта и его координат"""
+    """Извлечение локации из текста"""
     text_lower = text.lower()
     
-    # Поиск всех известных локаций в тексте
-    found_locations = []
-    for location_name, coords in LOCATIONS_DB.items():
-        if location_name in text_lower:
-            found_locations.append((location_name, coords))
+    found = []
+    for loc_name, coords in LOCATIONS_DB.items():
+        if loc_name in text_lower:
+            found.append((loc_name, coords))
     
-    if not found_locations:
+    if not found:
         return None
     
-    # Возвращаем первую найденную локацию (самую длинную, наиболее точную)
-    found_locations.sort(key=lambda x: len(x[0]), reverse=True)
-    return found_locations[0]
+    # Возвращаем самую длинную (наиболее точную)
+    found.sort(key=lambda x: len(x[0]), reverse=True)
+    return found[0]
 
 
 def detect_target_type(text: str) -> str:
@@ -261,45 +174,23 @@ def detect_target_type(text: str) -> str:
             if keyword in text_lower:
                 return target_type
     
-    return 'shahed'  # по умолчанию
-
-
-def extract_bearing(text: str) -> Optional[int]:
-    """Извлечение направления/курса"""
-    patterns = [
-        r'курс[:\s]+(\d{1,3})',
-        r'направление[:\s]+(\d{1,3})',
-        r'рух[:\s]+на\s+(\w+)',  # направление движения
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            try:
-                return int(match.group(1))
-            except:
-                pass
-    return None
+    return 'shahed'
 
 
 def parse_message(message_text: str, message_id: int, channel_name: str) -> Optional[List[Dict]]:
-    """
-    Парсинг сообщения и извлечение целей
-    Возвращает список целей (одно сообщение может содержать несколько целей)
-    """
+    """Парсинг сообщения"""
     if not message_text:
         return None
     
     targets = []
     
-    # 1. Проверяем на формат "▪️1 на Название⚠️"
+    # Проверка на формат "▪️1 на Название⚠️"
     bullet_pattern = r'▪️\d+\s+на\s+([А-Яа-яІіЇїЄє\'\-/\s]+?)[⚠️❗️]'
     bullet_matches = re.findall(bullet_pattern, message_text)
     
     if bullet_matches:
         for location_name in bullet_matches:
             location_name = location_name.strip().lower()
-            # Ищем координаты для этого названия
             for loc_name, coords in LOCATIONS_DB.items():
                 if loc_name in location_name or location_name in loc_name:
                     target_type = detect_target_type(message_text)
@@ -310,7 +201,7 @@ def parse_message(message_text: str, message_id: int, channel_name: str) -> Opti
                         "lon": coords[1],
                         "bearing": 0,
                         "description": f"Источник: {channel_name} | {message_text[:150]}",
-                        "location_name": loc_name,
+                        "location": loc_name,
                         "source_channel": channel_name,
                         "source_message_id": message_id,
                         "created_at": datetime.now().isoformat(),
@@ -319,22 +210,21 @@ def parse_message(message_text: str, message_id: int, channel_name: str) -> Opti
                     targets.append(target)
                     break
     
-    # 2. Если нет маркированного списка, ищем обычное упоминание
+    # Обычное упоминание
     if not targets:
-        location_info = extract_location(message_text)
-        if location_info:
-            location_name, coords = location_info
+        loc_info = extract_location(message_text)
+        if loc_info:
+            loc_name, coords = loc_info
             target_type = detect_target_type(message_text)
-            bearing = extract_bearing(message_text)
             
             target = {
                 "id": str(uuid.uuid4())[:8],
                 "type": target_type,
                 "lat": coords[0],
                 "lon": coords[1],
-                "bearing": bearing if bearing else 0,
+                "bearing": 0,
                 "description": f"Источник: {channel_name} | {message_text[:200]}",
-                "location_name": location_name,
+                "location": loc_name,
                 "source_channel": channel_name,
                 "source_message_id": message_id,
                 "created_at": datetime.now().isoformat(),
@@ -342,14 +232,13 @@ def parse_message(message_text: str, message_id: int, channel_name: str) -> Opti
             }
             targets.append(target)
     
-    # 3. Специальная обработка для сообщений типа "впал", "не фіксується" - удаляем цели
+    # Обработка "впал", "не фіксується" - удаляем последнюю цель
     if 'впав' in message_text or 'не фіксується' in message_text or 'більше не фіксується' in message_text:
-        # Возвращаем специальный маркер для удаления последней цели
-        return [{"action": "clear_last", "source_channel": channel_name}]
+        return [{"action": "clear_last"}]
     
-    # 4. Обработка отбоя
+    # Обработка отбоя
     if 'відбій' in message_text:
-        return [{"action": "clear_all", "source_channel": channel_name}]
+        return [{"action": "clear_all"}]
     
     return targets if targets else None
 
@@ -361,35 +250,31 @@ def add_target(target: Dict) -> bool:
     # Проверка на дубликаты (та же локация за последние 10 минут)
     current_time = datetime.now().timestamp()
     for existing in data['items'][-50:]:
-        if (existing.get('location_name') == target.get('location_name') and
+        if (existing.get('location') == target.get('location') and
             current_time - existing.get('timestamp', 0) < 600):
-            log_message(f"Пропущен дубликат локации: {target.get('location_name')}")
+            log_message(f"⏭️ Дубликат: {target.get('location')}")
             return False
     
     data['items'].append(target)
     
-    # Ограничиваем количество целей (последние 200)
+    # Ограничиваем количество (последние 200)
     if len(data['items']) > 200:
         data['items'] = data['items'][-200:]
     
     if save_targets(data):
-        log_message(f"✅ Добавлена цель: {target['type']} | {target.get('location_name', '?')} | {target['lat']}, {target['lon']}")
+        log_message(f"✅ Добавлено: {target['type']} | {target.get('location', '?')} | {target['lat']}, {target['lon']}")
         return True
     return False
 
 
-def clear_last_target(channel_name: str) -> bool:
-    """Удаление последней цели из указанного канала"""
+def clear_last_target() -> bool:
+    """Удаление последней цели"""
     data = load_targets()
-    
-    # Находим последнюю цель из этого канала
-    for i in range(len(data['items']) - 1, -1, -1):
-        if data['items'][i].get('source_channel') == channel_name:
-            removed = data['items'].pop(i)
-            if save_targets(data):
-                log_message(f"🗑️ Удалена цель: {removed.get('location_name', '?')} ({channel_name})")
-                return True
-            break
+    if data['items']:
+        removed = data['items'].pop()
+        if save_targets(data):
+            log_message(f"🗑️ Удалено: {removed.get('location', '?')}")
+            return True
     return False
 
 
@@ -401,11 +286,19 @@ def clear_all_targets() -> bool:
     return False
 
 
-# ==================== ОСНОВНАЯ ЛОГИКА ====================
+# ==================== ОСНОВНАЯ ЛОГИКА ПАРСЕРА ====================
 
 async def parse_existing_messages(client: TelegramClient):
     """Парсинг истории сообщений"""
-    state = load_state()
+    state_file = 'last_state.json'
+    state = {}
+    
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+        except:
+            pass
     
     for channel in SOURCE_CHANNELS:
         channel = channel.strip()
@@ -414,35 +307,40 @@ async def parse_existing_messages(client: TelegramClient):
         
         try:
             log_message(f"📥 Парсинг истории: {channel}")
-            last_msg_id = state.get(channel, 0)
             
-            async for message in client.iter_messages(channel, limit=100, min_id=last_msg_id):
+            # Получаем последний обработанный ID
+            last_id = state.get(channel, 0)
+            
+            # Получаем сообщения
+            async for message in client.iter_messages(channel, limit=100, min_id=last_id):
                 if not message or not message.text:
                     continue
                 
-                targets = parse_message(message.text, message.id, channel)
+                result = parse_message(message.text, message.id, channel)
                 
-                if targets:
-                    for target in targets:
-                        if target.get('action') == 'clear_last':
-                            clear_last_target(channel)
-                        elif target.get('action') == 'clear_all':
+                if result:
+                    for item in result:
+                        if item.get('action') == 'clear_last':
+                            clear_last_target()
+                        elif item.get('action') == 'clear_all':
                             clear_all_targets()
                         else:
-                            add_target(target)
+                            add_target(item)
                     
+                    # Обновляем состояние
                     if message.id > state.get(channel, 0):
                         state[channel] = message.id
-                        save_state(state)
+                        with open(state_file, 'w') as f:
+                            json.dump(state, f)
                 
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.3)  # Задержка
                 
         except Exception as e:
             log_message(f"❌ Ошибка парсинга {channel}: {e}")
 
 
 async def listen_for_new_messages(client: TelegramClient):
-    """Прослушивание новых сообщений"""
+    """Прослушивание новых сообщений в реальном времени"""
     
     @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
     async def message_handler(event):
@@ -453,134 +351,75 @@ async def listen_for_new_messages(client: TelegramClient):
         if not message or not message.text:
             return
         
-        log_message(f"📨 Новое сообщение: {message.text[:100]}...")
+        log_message(f"📨 Новое сообщение из {channel_name}: {message.text[:80]}...")
         
-        targets = parse_message(message.text, message.id, channel_name)
+        result = parse_message(message.text, message.id, channel_name)
         
-        if targets:
-            for target in targets:
-                if target.get('action') == 'clear_last':
-                    clear_last_target(channel_name)
-                elif target.get('action') == 'clear_all':
+        if result:
+            for item in result:
+                if item.get('action') == 'clear_last':
+                    clear_last_target()
+                elif item.get('action') == 'clear_all':
                     clear_all_targets()
                 else:
-                    add_target(target)
-            
-            # Обновляем состояние
-            state = load_state()
-            if message.id > state.get(channel_name, 0):
-                state[channel_name] = message.id
-                save_state(state)
+                    add_target(item)
 
 
-# ==================== КОМАНДЫ ====================
+# ==================== АВТОРИЗАЦИЯ ====================
 
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMIN_IDS
-
-
-async def handle_start(event):
-    text = """🤖 **Sky Kharkiv Parser Bot**
-
-Бот парсит сообщения канала @monitor1654 и добавляет цели на карту.
-
-**Команды:**
-/stats - статистика
-/status - статус парсера
-/clear - очистить все цели
-"""
-    await event.respond(text, parse_mode='markdown')
-
-
-async def handle_stats(event):
-    data = load_targets()
-    items = data.get('items', [])
+async def authorize(client: TelegramClient):
+    """Авторизация через телефон (однократно)"""
+    if not PHONE_NUMBER:
+        log_message("❌ PHONE_NUMBER не задан!")
+        return False
     
-    if not items:
-        await event.respond("📊 Нет активных целей")
-        return
-    
-    types = {}
-    for item in items[-50:]:
-        t = item.get('type', 'unknown')
-        types[t] = types.get(t, 0) + 1
-    
-    type_lines = '\n'.join([f"• {t}: {c}" for t, c in types.items()])
-    
-    text = f"""
-📊 **Статистика**
-
-**Всего целей:** {len(items)}
-**Последние 50:** {sum(types.values())}
-
-**По типам:**
-{type_lines}
-
-🕐 {datetime.now().strftime('%H:%M:%S')}
-"""
-    await event.respond(text, parse_mode='markdown')
+    try:
+        # Пытаемся войти по сохраненной сессии
+        await client.start(phone=PHONE_NUMBER)
+        log_message(f"✅ Авторизация успешна! Аккаунт: {await client.get_me()}")
+        return True
+    except Exception as e:
+        log_message(f"❌ Ошибка авторизации: {e}")
+        return False
 
 
-async def handle_status(event):
-    text = f"""
-🔍 **Статус парсера**
-
-**Каналы:** {', '.join(SOURCE_CHANNELS)}
-
-**Последние обработанные сообщения:**
-"""
-    state = load_state()
-    for ch, msg_id in state.items():
-        text += f"\n• {ch}: {msg_id}"
-    
-    await event.respond(text, parse_mode='markdown')
-
-
-async def handle_clear(event):
-    if not is_admin(event.sender_id):
-        await event.respond("⛔ Доступ запрещен")
-        return
-    
-    if clear_all_targets():
-        await event.respond("✅ Все цели удалены")
-    else:
-        await event.respond("❌ Ошибка")
-
-
-# ==================== MAIN ====================
+# ==================== ЗАПУСК ====================
 
 async def main():
     """Запуск парсера"""
     
+    # Проверка конфигурации
     if not API_ID or not API_HASH:
         log_message("❌ Ошибка: не заданы API_ID или API_HASH")
+        log_message("Установите переменные окружения: API_ID, API_HASH, PHONE_NUMBER")
         return
     
-    client = TelegramClient('parser_session', API_ID, API_HASH)
+    if not PHONE_NUMBER:
+        log_message("❌ Ошибка: не задан PHONE_NUMBER")
+        log_message("Установите переменную окружения PHONE_NUMBER (например: +380123456789)")
+        return
     
-    @client.on(events.NewMessage(pattern='/start'))
-    async def start_handler(e): await handle_start(e)
+    if not SOURCE_CHANNELS or SOURCE_CHANNELS == ['']:
+        log_message("⚠️ Внимание: не заданы SOURCE_CHANNELS!")
     
-    @client.on(events.NewMessage(pattern='/stats'))
-    async def stats_handler(e): await handle_stats(e)
+    # Создаем клиента с сессией
+    client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
     
-    @client.on(events.NewMessage(pattern='/status'))
-    async def status_handler(e): await handle_status(e)
-    
-    @client.on(events.NewMessage(pattern='/clear'))
-    async def clear_handler(e): await handle_clear(e)
-    
-    await client.start()
+    # Авторизация
+    if not await authorize(client):
+        log_message("❌ Не удалось авторизоваться")
+        return
     
     log_message(f"✅ Парсер запущен!")
-    log_message(f"📡 Каналы: {SOURCE_CHANNELS}")
+    log_message(f"📡 Отслеживаемые каналы: {SOURCE_CHANNELS}")
     
     # Парсим историю
     await parse_existing_messages(client)
     
-    # Слушаем новые сообщения
+    # Запускаем прослушивание новых сообщений
     await listen_for_new_messages(client)
     
+    # Держим бота активным
     await client.run_until_disconnected()
 
 
@@ -588,6 +427,6 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n👋 Остановлен")
+        print("\n👋 Остановлен пользователем")
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"❌ Критическая ошибка: {e}")
