@@ -1,40 +1,47 @@
-name: NEPTUN_TACTICAL_OS
+name: Telegram Parser
+
 on:
-  push:
-    branches: [ main ]
   schedule:
-    - cron: '*/5 * * * *' # Запуск каждые 5 минут
-  workflow_dispatch:
+    # Запуск каждые 5 минут для поддержания работы
+    - cron: '*/5 * * * *'
+  workflow_dispatch:  # Ручной запуск
 
 jobs:
-  run-bot:
+  run-parser:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: pip install telethon
-
-      - name: Run Bot
-        env:
-          API_ID: ${{ secrets.API_ID }}
-          API_HASH: ${{ secrets.API_HASH }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
-        run: python parser.py
-
-      - name: Commit and Push
-        run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@github.com"
-          git add targets.json
-          git commit -m "Update targets" || exit 0
-          git push
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install telethon
+    
+    - name: Run parser
+      env:
+        API_ID: ${{ secrets.API_ID }}
+        API_HASH: ${{ secrets.API_HASH }}
+        SOURCE_CHANNELS: ${{ secrets.SOURCE_CHANNELS }}
+        ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        python bot.py &
+        sleep 280
+    
+    - name: Commit and push changes
+      run: |
+        git config --global user.name 'GitHub Bot'
+        git config --global user.email 'bot@github.com'
+        git add targets.json bot.log last_message_state.json || true
+        git commit -m "Auto-update targets from channels" || echo "No changes"
+        git push || echo "No push needed"
