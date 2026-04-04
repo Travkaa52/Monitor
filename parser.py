@@ -19,7 +19,7 @@ from telethon import TelegramClient, events
 # Обязательные переменные
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
-PHONE_NUMBER = os.environ.get('PHONE_NUMBER', '')  # Номер телефона в формате +380...
+PHONE_NUMBER = os.environ.get('PHONE_NUMBER', '+380509514525')  # Номер телефона в формате +380...
 
 # Каналы для парсинга (можно username или ID)
 SOURCE_CHANNELS = os.environ.get('SOURCE_CHANNELS', '@monitor1654').split(',')
