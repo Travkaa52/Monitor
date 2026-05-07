@@ -22,9 +22,9 @@ CHANNEL_ID = 'monitorkh1654'
 #    Права: repo → contents (read & write)
 # 2. Замініть значення нижче на ваші
 
-GITHUB_TOKEN = 'ghp_ВАШ_ТОКЕН_ТУТ'          # GitHub Personal Access Token
-GITHUB_OWNER = 'ваш_нікнейм'                  # Ваш GitHub username або org
-GITHUB_REPO  = 'назва_репозиторію'             # Назва вашого репо (публічне!)
+GITHUB_TOKEN = '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'          # GitHub Personal Access Token
+GITHUB_OWNER = 'Travkaa52'                  # Ваш GitHub username або org
+GITHUB_REPO  = 'Monitor'             # Назва вашого репо (публічне!)
 GITHUB_BRANCH = 'main'                         # Гілка (main або master)
 GITHUB_FILE  = 'targets.json'                  # Шлях до файлу в репо
 
