@@ -1,4 +1,4 @@
 aiohttp
 telethon
-asyncio
 requests
+aiogram>=3.4

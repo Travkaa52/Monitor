@@ -10,7 +10,27 @@
   <title>Monitor Kharkiv — </title>
 
   <script src="config.dev.js?v=20260206-15"></script>
-<script>
+
+  <!-- Telegram Mini App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+  (function initTelegramWebApp() {
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg) return;
+    tg.ready();
+    tg.expand();
+    try {
+      document.documentElement.style.setProperty('--tg-bg-color', tg.themeParams.bg_color || '#060705');
+      document.documentElement.style.setProperty('--tg-text-color', tg.themeParams.text_color || '#00ff41');
+      if (tg.setHeaderColor) tg.setHeaderColor('secondary_bg_color');
+    } catch (e) {
+      console.warn('[TelegramWebApp] theme init error:', e);
+    }
+    window.tgWebApp = tg;
+  })();
+  </script>
+
+  <script>
 /* ===== Polling: отримання цілей кожні 5с ===== */
 function ensureDebugEl(){
   let el = document.getElementById('tgDebug');
@@ -26,15 +46,7 @@ function ensureDebugEl(){
 setInterval(async () => {
   try {
     // Додаємо timestamp, щоб GitHub не кешував старі дані
-    const response = await fetch(`./targets.json?t=${Date.now()}`); 
-    const data = await response.json();
-    if (typeof updateMapData === 'function' && map) {
-      updateMapData(data);
-    }
-  } catch (e) {
-    console.warn('[Viewer] fetch error:', e);
-  }
-}, 5000);
+    const response = await fetch(`./targets.json?t=${Date.now()}`);
     const data = await response.json();
     if (typeof updateMapData === 'function' && map) {
       updateMapData(data);
